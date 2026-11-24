@@ -1,0 +1,76 @@
+spring:
+  profiles:
+    active: dev
+  application:
+    name: auth-service
+  main:
+    log-startup-info: false
+  cloud:
+    nacos:
+      discovery:
+        # Nacos 3.x：客户端通信仍是 8848（gRPC 9848/9849），控制台另走 8080 端口
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+  datasource:
+    # 连接凭据不写进版本库：本地值在 application-dev.yml（已被 gitignore），生产由环境变量提供
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      pool-name: AuthHikariCP
+  data:
+    redis:
+      # 图形验证码答案存 Redis；密码不写进 yml，生产用 SPRING_DATA_REDIS_PASSWORD 注入
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      # 管理员令牌失效标记读取；限制 Redis 不可达时的最坏耗时
+      timeout: 2s
+
+server:
+  port: 9001
+
+# 慢 SQL 采集：MyBatis 拦截器只记录超过阈值的语句，供 system-service 数据库监控页展示
+monitor:
+  sql:
+    enabled: ${MONITOR_SQL_ENABLED:true}
+    slow-threshold-ms: ${MONITOR_SQL_SLOW_MS:300}
+    max-per-minute: ${MONITOR_SQL_MAX_PER_MIN:60}
+
+# Actuator：只暴露健康与指标，供 system-service 内网聚合；网关不转发 /actuator/**
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+  # mappers/ 下按业务模块分子目录存放，** 递归匹配
+  mapper-locations: classpath*:mappers/**/*.xml
+
+# JWT 配置：登录成功后签发令牌。secret 必须与其它服务（gateway/user-service）一致，否则令牌跨服务校验失败
+jwt:
+  secret: ${JWT_SECRET}
+  #token有效期，单位：秒（7天）
+  expire: 604800
+
+# 后台登录失败锁定：同一「用户名 + IP」连续输错密码达到次数后锁定
+auth:
+  login:
+    max-fail-count: ${LOGIN_MAX_FAIL_COUNT:5}
+    lock-minutes: ${LOGIN_LOCK_MINUTES:10}
+
+# 接口文档：安全兜底默认关闭，避免生产环境暴露
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:false}

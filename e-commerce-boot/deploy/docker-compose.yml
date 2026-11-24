@@ -1,0 +1,208 @@
+# 生产部署（/www/java）：Nacos 3.1.1 + 10 个 Spring Boot 服务
+# 使用前：
+#   1. 每个服务目录放好 Dockerfile + 一个 jar
+#   2. 本文件同目录放 .env（从 .env.example 复制并填值）
+#   3. 先起 redis + nacos，等就绪再起其它服务
+services:
+  # Redis：服务间走 my-net 内网（容器名 redis:6379）。
+  # 额外绑 127.0.0.1:16379 仅供 SSH 隧道远程查看（RedisInsight），不绑 0.0.0.0，公网访问不到。
+  # 密码与服务共用 .env 里的 SPRING_DATA_REDIS_PASSWORD
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${SPRING_DATA_REDIS_PASSWORD}"]
+    ports:
+      # 只绑宿主机回环地址：公网/外部访问不到，运维通过 ssh -L 16379:127.0.0.1:16379 隧道连
+      - "127.0.0.1:16379:6379"
+    volumes:
+      # AOF 落盘，容器重建数据不丢
+      - ./redis-data:/data
+    networks:
+      - my-net
+
+  nacos:
+    image: nacos/nacos-server:v3.1.1
+    container_name: nacos
+    restart: always
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      # Nacos 3.x 即使关闭鉴权也要求这个非空，否则启动脚本会报错
+      NACOS_AUTH_TOKEN: SecretKey01234567890123456789012345678901234567890123456789
+      NACOS_AUTH_IDENTITY_KEY: nacos
+      NACOS_AUTH_IDENTITY_VALUE: nacos
+      JVM_XMS: 128m
+      JVM_XMX: 256m
+    ports:
+      # Nacos 3.x 控制台（容器内 8080）。只绑本机，通过 SSH 隧道访问，不对公网开放
+      # 8848/9848/9849 只走 Docker 内网，不映射到宿主
+      - "127.0.0.1:18080:8080"
+    networks:
+      - my-net
+
+  auth-service:
+    image: "${REGISTRY:-local}/auth-service:${TAG:-latest}"
+    build: ./auth-service
+    container_name: auth-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - my-net
+
+  product-service:
+    image: "${REGISTRY:-local}/product-service:${TAG:-latest}"
+    build: ./product-service
+    container_name: product-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 商品图（upload/image）与用户头像（upload/avatar）共用同一个宿主目录
+      - ./upload:/app/upload
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss256k -XX:+UseSerialGC -Duser.timezone=Asia/Shanghai"
+    networks:
+      - my-net
+
+  order-service:
+    image: "${REGISTRY:-local}/order-service:${TAG:-latest}"
+    build: ./order-service
+    container_name: order-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss256k -XX:+UseSerialGC -Duser.timezone=Asia/Shanghai"
+      # 库存扣减委托 product-service 内部接口（Docker 内网容器名）
+      STOCK_INTERNAL_URL: "http://product-service:9003/internal/stock-write"
+    networks:
+      - my-net
+
+  aftersale-service:
+    image: "${REGISTRY:-local}/aftersale-service:${TAG:-latest}"
+    build: ./aftersale-service
+    container_name: aftersale-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # 售后退款回补库存委托 product-service 内部接口（Docker 内网容器名）
+      STOCK_INTERNAL_URL: "http://product-service:9003/internal/stock-write"
+    networks:
+      - my-net
+
+  user-service:
+    image: "${REGISTRY:-local}/user-service:${TAG:-latest}"
+    build: ./user-service
+    container_name: user-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 头像落盘 upload/avatar
+      - ./upload:/app/upload
+    networks:
+      - my-net
+
+  file-service:
+    image: "${REGISTRY:-local}/file-service:${TAG:-latest}"
+    build: ./file-service
+    container_name: file-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - my-net
+
+  # 系统管理（用户/角色/菜单/日志/数据库/接口）+ 系统监控：OSHI 主机指标 + Docker socket 只读看容器 + Redis SCAN 缓存
+  # Docker socket 只读挂载也等于宿主信息可读，因此本服务绝不对公网开放，
+  # 网关只放行 /api/admin/system/** 与 /api/admin/monitor/**，且必须后台 JWT + 对应权限
+  system-service:
+    image: "${REGISTRY:-local}/system-service:${TAG:-latest}"
+    build: ./system-service
+    container_name: system-service
+    restart: always
+    depends_on:
+      - nacos
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 数据库备份持久目录：容器重建不丢备份文件
+      - ./backup/db:/data/backup/db
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss256k -XX:+UseSerialGC -Duser.timezone=Asia/Shanghai"
+      MONITOR_DOCKER_SOCKET: "/var/run/docker.sock"
+      DB_BACKUP_DIR: "/data/backup/db"
+      # 接口管理同步 OpenAPI 时走 Docker 内网网关
+      GATEWAY_URL: "http://gateway:8080"
+    networks:
+      - my-net
+
+  # 导购机器人：Python FastAPI + LangGraph，网关按静态地址转发
+  ai-service:
+    image: "${REGISTRY:-local}/ai-service:${TAG:-latest}"
+    build: ./ai-service
+    container_name: ai-service
+    restart: always
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 生图落盘必须挂载到宿主机，否则 nginx /image/ai/ 找不到文件 404（Python 默认写 /app/upload/image/ai）
+      - ./upload/image/ai:/app/upload/image/ai
+    networks:
+      - my-net
+
+  gateway:
+    image: "${REGISTRY:-local}/gateway:${TAG:-latest}"
+    build: ./gateway
+    container_name: gateway
+    restart: always
+    depends_on:
+      - nacos
+      - auth-service
+      - product-service
+      - order-service
+      - aftersale-service
+      - user-service
+      - file-service
+      - system-service
+      - ai-service
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # 只暴露给宿主机 Nginx；公网只开 443
+      - "127.0.0.1:8080:8080"
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss256k -XX:+UseSerialGC -Duser.timezone=Asia/Shanghai"
+      # Python 导购服务在 Docker 内网的名字，覆盖本地默认的 127.0.0.1
+      AI_SERVICE_URL: "http://ai-service:8000"
+    networks:
+      - my-net
+
+networks:
+  my-net:
+    driver: bridge

@@ -1,0 +1,68 @@
+@import './style/index.less';
+@import './antd/index.less';
+@root-entry-name: variable;
+
+*::backdrop {
+  @apply bg-layout;
+}
+
+/* 工作台左侧导航栏背景色 —— 直接覆盖，绕过 stepin 的 39 个 html{} 变量定义 */
+.stepin-view .stepin-layout-side {
+  background-color: rgb(39, 44, 58) !important;
+  padding-top:20px;
+}
+.stepin-view .stepin-layout-side .stepin-menu,
+.stepin-view .stepin-layout-side .ant-menu {
+  background-color: rgb(39, 44, 58) !important;
+}
+
+/* 导航栏字色：必须打到 .ant-menu-item a（antd 自己在这里设了 rgba(0,0,0,0.85)） */
+.stepin-view .stepin-layout-side .ant-menu-item,
+.stepin-view .stepin-layout-side .ant-menu-submenu-title,
+.stepin-view .stepin-layout-side .ant-menu-item a,
+.stepin-view .stepin-layout-side .ant-menu-title-content,
+.stepin-view .stepin-layout-side .ant-menu-item .anticon,
+.stepin-view .stepin-layout-side .ant-menu-submenu .anticon {
+  color: #fff !important;
+}
+/* 父级路由（商品管理 等）下拉箭头：antd 箭头用 currentcolor 画 ::before/::after，深背景上默认看不到 */
+.stepin-view .stepin-layout-side .ant-menu-submenu-arrow,
+.stepin-view .stepin-layout-side .ant-menu-submenu-expand-icon {
+  color: #fff !important;
+}
+/* 选中态保持高亮 */
+.stepin-view .stepin-layout-side .ant-menu-item-selected,
+.stepin-view .stepin-layout-side .ant-menu-item-selected a,
+.stepin-view .stepin-layout-side .ant-menu-item-selected .ant-menu-title-content {
+  color: #fff!important;
+  background:#1890ff;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* 整个侧边栏 logo 都不要 */
+.stepin-logo {
+  display: none !important;
+}
+
+/* 强制显示顶部多页签（DOM 存在但被压成 0/隐藏） */
+.stepin-view .stepin-layout-content .stepin-view-main .stepin-tabs-view {
+  display: block !important;
+  visibility: visible !important;
+  height: auto !important;
+  min-height: 40px !important;
+  opacity: 1 !important;
+}
+/* 页签本体（ant-tabs 组件）也强制显示 */
+.stepin-view .stepin-layout-content .stepin-view-main .stepin-tabs-view .ant-tabs {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+.stepin-view .stepin-layout-content .stepin-view-main .stepin-tabs-view .ant-tabs-nav {
+  display: flex !important;
+  visibility: visible !important;
+  margin-bottom: 0 !important;
+}
+
+/* 响应式覆盖放最后加载，确保能压过 stepin/antd 默认样式 */
+@import './style/responsive.less';

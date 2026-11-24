@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.order.mapper.CouponSeckillOrderMapper">
+
+    <sql id="columns">
+        id, order_no, coupon_id, user_id, coupon_user_id, coupon_name, pay_amount, pay_type,
+        status, create_time, expire_time, pay_time, cancel_time, refund_time, update_time
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO coupon_seckill_order
+            (order_no, coupon_id, user_id, coupon_user_id, coupon_name, pay_amount, pay_type,
+             status, create_time, expire_time)
+        VALUES
+            (#{orderNo}, #{couponId}, #{userId}, #{couponUserId}, #{couponName}, #{payAmount}, #{payType},
+             #{status}, #{createTime}, #{expireTime})
+    </insert>
+
+    <select id="findByOrderNoAndUserId" resultType="ecommerce.order.entity.CouponSeckillOrder">
+        SELECT <include refid="columns"/>
+        FROM coupon_seckill_order
+        WHERE order_no = #{orderNo} AND user_id = #{userId}
+    </select>
+
+    <select id="findById" resultType="ecommerce.order.entity.CouponSeckillOrder">
+        SELECT <include refid="columns"/>
+        FROM coupon_seckill_order
+        WHERE id = #{id}
+    </select>
+
+    <select id="countByCouponIdAndUserId" resultType="long">
+        SELECT COUNT(*) FROM coupon_seckill_order
+        WHERE coupon_id = #{couponId} AND user_id = #{userId}
+    </select>
+
+    <select id="listByUserId" resultType="ecommerce.order.entity.CouponSeckillOrder">
+        SELECT <include refid="columns"/>
+        FROM coupon_seckill_order
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*) FROM coupon_seckill_order
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </select>
+
+    <update id="payById">
+        UPDATE coupon_seckill_order
+        SET status = 2,
+            pay_time = #{payTime},
+            pay_type = #{payType},
+            coupon_user_id = #{couponUserId},
+            update_time = #{now}
+        WHERE id = #{id} AND status = 1
+    </update>
+
+    <update id="cancelById">
+        UPDATE coupon_seckill_order
+        SET status = 3,
+            cancel_time = #{now},
+            update_time = #{now}
+        WHERE id = #{id} AND status = 1
+    </update>
+
+    <update id="markRefunded">
+        UPDATE coupon_seckill_order
+        SET status = 4,
+            refund_time = #{now},
+            update_time = #{now}
+        WHERE id = #{id} AND status = 2
+    </update>
+
+    <select id="listExpired" resultType="ecommerce.order.entity.CouponSeckillOrder">
+        SELECT id, coupon_id, order_no
+        FROM coupon_seckill_order
+        WHERE status = 1 AND expire_time &lt;= #{now}
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 财务看板：已退款仍保留历史实收，退款在 refund_time 单独计支出 -->
+    <select id="sumFinancePaid" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(pay_amount), 0)
+        FROM coupon_seckill_order
+        WHERE status IN (2, 4)
+          AND pay_time &gt;= #{start} AND pay_time &lt; #{end}
+        <if test="channel != null and channel != ''">
+            AND pay_type = #{channel}
+        </if>
+    </select>
+
+    <select id="sumFinanceRefunded" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(pay_amount), 0)
+        FROM coupon_seckill_order
+        WHERE status = 4
+          AND refund_time &gt;= #{start} AND refund_time &lt; #{end}
+        <if test="channel != null and channel != ''">
+            AND pay_type = #{channel}
+        </if>
+    </select>
+
+    <select id="sumFinancePaidByDay" resultType="map">
+        SELECT DATE_FORMAT(pay_time, '%Y-%m-%d') AS date_key, COALESCE(SUM(pay_amount), 0) AS amount
+        FROM coupon_seckill_order
+        WHERE status IN (2, 4)
+          AND pay_time &gt;= #{start} AND pay_time &lt; #{end}
+        <if test="channel != null and channel != ''">
+            AND pay_type = #{channel}
+        </if>
+        GROUP BY DATE_FORMAT(pay_time, '%Y-%m-%d')
+        ORDER BY date_key
+    </select>
+
+    <select id="sumFinanceRefundedByDay" resultType="map">
+        SELECT DATE_FORMAT(refund_time, '%Y-%m-%d') AS date_key, COALESCE(SUM(pay_amount), 0) AS amount
+        FROM coupon_seckill_order
+        WHERE status = 4
+          AND refund_time &gt;= #{start} AND refund_time &lt; #{end}
+        <if test="channel != null and channel != ''">
+            AND pay_type = #{channel}
+        </if>
+        GROUP BY DATE_FORMAT(refund_time, '%Y-%m-%d')
+        ORDER BY date_key
+    </select>
+
+    <select id="sumFinancePaidByChannel" resultType="map">
+        SELECT COALESCE(pay_type, 'Unknown') AS channel,
+               COALESCE(SUM(pay_amount), 0) AS amount,
+               COUNT(*) AS order_count
+        FROM coupon_seckill_order
+        WHERE status IN (2, 4)
+          AND pay_time &gt;= #{start} AND pay_time &lt; #{end}
+        <if test="channel != null and channel != ''">
+            AND pay_type = #{channel}
+        </if>
+        GROUP BY COALESCE(pay_type, 'Unknown')
+        ORDER BY amount DESC
+    </select>
+
+</mapper>

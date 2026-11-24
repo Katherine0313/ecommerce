@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.product.mapper.StockSkuMapper">
+
+    <sql id="skuColumns">
+        s.id, s.product_id AS productId, p.name AS productName, p.image AS productImage,
+        s.sku_code AS skuCode, s.spec_json AS specJson, s.stock,
+        s.min_stock AS minStock, s.max_stock AS maxStock, s.status, s.price
+    </sql>
+
+    <!-- SKU 分页：JOIN products 拿商品名和主图，支持商品名/SKU编码模糊搜索 -->
+    <select id="pageList" resultType="ecommerce.product.vo.StockSkuVO">
+        SELECT <include refid="skuColumns"/>
+        FROM product_sku s
+        INNER JOIN products p ON p.id = s.product_id
+        <where>
+            <if test="search != null and search != ''">
+                AND (s.sku_code LIKE CONCAT('%', #{search}, '%')
+                     OR p.name LIKE CONCAT('%', #{search}, '%'))
+            </if>
+            <if test="lowStockOnly">
+                AND s.min_stock > 0 AND s.stock &lt; s.min_stock AND s.status = 1
+            </if>
+        </where>
+        ORDER BY s.stock ASC, s.id ASC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="pageCount" resultType="int">
+        SELECT COUNT(1) FROM product_sku s
+        INNER JOIN products p ON p.id = s.product_id
+        <where>
+            <if test="search != null and search != ''">
+                AND (s.sku_code LIKE CONCAT('%', #{search}, '%')
+                     OR p.name LIKE CONCAT('%', #{search}, '%'))
+            </if>
+            <if test="lowStockOnly">
+                AND s.min_stock > 0 AND s.stock &lt; s.min_stock AND s.status = 1
+            </if>
+        </where>
+    </select>
+
+    <!-- 看板：低库存 TOP N -->
+    <select id="lowStockTopN" resultType="ecommerce.product.vo.StockSkuVO">
+        SELECT <include refid="skuColumns"/>
+        FROM product_sku s
+        INNER JOIN products p ON p.id = s.product_id
+        WHERE s.min_stock > 0 AND s.stock &lt; s.min_stock AND s.status = 1
+        ORDER BY s.stock ASC, s.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="countLowStock" resultType="int">
+        SELECT COUNT(1) FROM product_sku s
+        WHERE s.min_stock > 0 AND s.stock &lt; s.min_stock AND s.status = 1
+    </select>
+
+    <!-- 看板：SKU 总数（启用状态） -->
+    <select id="totalCount" resultType="int">
+        SELECT COUNT(1) FROM product_sku WHERE status = 1
+    </select>
+
+    <update id="updateAlert">
+        UPDATE product_sku
+        <set>
+            <if test="minStock != null">min_stock = #{minStock},</if>
+            <if test="maxStock != null">max_stock = #{maxStock},</if>
+            update_time = NOW()
+        </set>
+        WHERE id = #{skuId}
+    </update>
+
+    <!-- 批量更新预警阈值 -->
+    <update id="batchUpdateAlert">
+        UPDATE product_sku
+        <set>
+            <if test="minStock != null">min_stock = #{minStock},</if>
+            <if test="maxStock != null">max_stock = #{maxStock},</if>
+            update_time = NOW()
+        </set>
+        WHERE id IN
+        <foreach collection="skuIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+
+    <!-- 看板：SKU 库存分布 TOP N（水平柱状图用） -->
+    <select id="stockDistTopN" resultType="java.util.HashMap">
+        SELECT p.name AS productName, s.spec_key AS specText, s.stock
+        FROM product_sku s
+        INNER JOIN products p ON p.id = s.product_id
+        WHERE s.status = 1
+        ORDER BY s.stock DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 看板：低库存 TOP N（带风险级别 CASE + 今日出库 LEFT JOIN） -->
+    <select id="lowStockDetail" resultType="java.util.HashMap">
+        SELECT
+            s.id AS skuId,
+            p.name AS productName,
+            s.spec_key AS specText,
+            s.stock,
+            s.min_stock AS minStock,
+            CASE
+                WHEN s.stock = 0 THEN 'urgent'
+                WHEN s.stock &lt; s.min_stock * 0.3 THEN 'high'
+                ELSE 'mid'
+            END AS riskLevel,
+            ROUND(s.stock / NULLIF(s.min_stock, 0), 2) AS stockRate,
+            COALESCE(t.todayOut, 0) AS todayOutQty
+        FROM product_sku s
+        INNER JOIN products p ON p.id = s.product_id
+        LEFT JOIN (
+            SELECT sku_id, SUM(qty) AS todayOut
+            FROM stock_transaction
+            WHERE type = 'OUT' AND DATE(create_time) = CURDATE()
+            GROUP BY sku_id
+        ) t ON t.sku_id = s.id
+        WHERE s.status = 1
+          AND s.min_stock IS NOT NULL
+          AND s.stock &lt; s.min_stock
+        ORDER BY s.stock ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

@@ -1,0 +1,111 @@
+spring:
+  profiles:
+    active: dev
+  application:
+    name: user-service
+  main:
+    log-startup-info: false
+  cloud:
+    nacos:
+      discovery:
+        # Nacos 3.x：客户端通信仍是 8848（gRPC 9848/9849），控制台另走 8080 端口
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+  datasource:
+    # 连接凭据不写进版本库：本地值在 application-dev.yml（已被 gitignore），
+    # 生产由环境变量提供。用户名/密码故意不给默认值，缺失就启动失败，避免悄悄用了错的值。
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      pool-name: MyHikariCP
+  data:
+    redis:
+      # JwtInterceptor 读取管理员令牌失效标记；Redis 不可达时 fail-open（只影响踢下线）
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  http:
+    clients:
+      # 调用外部接口（如微信）的超时，避免对方无响应时一直占着请求线程
+      connect-timeout: 3s
+      read-timeout: 5s
+  servlet:
+    multipart:
+      # 上传限制：单文件 2MB，整个请求 3MB（给表单里的其他字段留余量）。
+      # 不配的话是 Spring Boot 默认的 1MB / 10MB。超限由 GlobalExceptionHandler 转成 413 + 可读提示。
+      max-file-size: 2MB
+      max-request-size: 3MB
+
+server:
+  port: 9006
+
+# 慢 SQL 采集：MyBatis-Plus 同样会注册容器里的 Interceptor，阈值口径与其他服务一致
+monitor:
+  sql:
+    enabled: ${MONITOR_SQL_ENABLED:true}
+    slow-threshold-ms: ${MONITOR_SQL_SLOW_MS:300}
+    max-per-minute: ${MONITOR_SQL_MAX_PER_MIN:60}
+
+# Actuator：只暴露健康与指标，供 system-service 内网聚合；网关不转发 /actuator/**
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    org.springframework: WARN
+    org.springframework.boot: WARN
+    org.springframework.web: WARN
+    com.zaxxer.hikari: WARN
+    org.apache.tomcat: WARN
+    org.apache.catalina: WARN
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+# 微信小程序配置：登录时用 code 换取 openid
+# 真实值不写在这里（避免提交到 git），由激活的 profile 文件或环境变量提供
+wechat:
+  appid: ${WECHAT_APPID:}
+  secret: ${WECHAT_SECRET:}
+  # 本地开发兜底（默认关闭）：微信因 IP 不在白名单拒绝(40164)时，用固定 mock openid 登录。
+  # 只在本地 application-dev.yml 打开，生产环境不要配置成 true。
+  dev-mock-enabled: ${WECHAT_DEV_MOCK_ENABLED:false}
+
+#JWT 配置：登录成功后签发令牌
+jwt:
+  secret: ${JWT_SECRET}
+  #token有效期，单位：秒（7天）
+  expire: 604800
+
+# 阿里云短信：PC 端登录验证码下发
+# 真实密钥不写在这里（避免提交到 git），由激活的 profile 文件或环境变量提供
+aliyun:
+  sms:
+    access-key-id: ${SMS_ACCESS_KEY_ID:}
+    access-key-secret: ${SMS_ACCESS_KEY_SECRET:}
+    # 签名，阿里云控制台审核通过后获得
+    sign-name: ${SMS_SIGN_NAME:}
+    # 模板 code，如 SMS_33960536；模板变量固定为 ${code}
+    template-code: ${SMS_TEMPLATE_CODE:}
+    endpoint: ${SMS_ENDPOINT:dysmsapi.aliyuncs.com}
+
+# 接口文档：这里作为安全兜底「默认关闭」，只在 application-dev.yml 中开启。
+# 这样生产环境即使配错 profile 也不会把 /swagger-ui.html 和 /v3/api-docs 暴露出去。
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:false}

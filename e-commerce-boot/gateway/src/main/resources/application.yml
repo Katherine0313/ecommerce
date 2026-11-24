@@ -1,0 +1,249 @@
+spring:
+  application:
+    name: gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:}
+        password: ${NACOS_PASSWORD:}
+    gateway:
+      # Spring Cloud Gateway 5.x：路由前缀从 spring.cloud.gateway.routes 改成 server.webflux.routes
+      #
+      # 路由编排约定（查找 / 新增接口前先看这里）：
+      #   1. 长路由按「业务域」分组写 Path.patterns，同域的 C 端 / 后台路径放在一起，便于定位。
+      #   2. 各业务路由的路径互不重叠，彼此顺序无功能影响；唯一硬约束：【兜底通配 /api/** 必须放在最后】，
+      #      否则会把更具体的路径整段吃掉。
+      #      历史踩坑：coupon-seckill-refunds 漏配 → 请求掉进 user-service 兜底 → user-service 无此接口 → 404。
+      #   3. 新增接口时：先确认归属服务，把路径加到对应服务路由的同域分组里；如果某路径"该走 A 服务却 404 / 走错服务"，
+      #      大概率是它没在任何业务路由里、被 /api/** 兜底接走了——补业务路由，不要依赖兜底。
+      server:
+        webflux:
+          routes:
+            # ===== Swagger 文档聚合：各服务 /v3/api-docs 去掉服务名前缀后转发，供末尾 springdoc.urls 下拉 =====
+            - id: auth-service-api-docs
+              uri: lb://auth-service
+              predicates:
+                - Path=/auth-service/v3/api-docs
+              filters:
+                - RewritePath=/auth-service/(?<segment>.*), /$\{segment}
+            - id: product-service-api-docs
+              uri: lb://product-service
+              predicates:
+                - Path=/product-service/v3/api-docs
+              filters:
+                - RewritePath=/product-service/(?<segment>.*), /$\{segment}
+            - id: order-service-api-docs
+              uri: lb://order-service
+              predicates:
+                - Path=/order-service/v3/api-docs
+              filters:
+                - RewritePath=/order-service/(?<segment>.*), /$\{segment}
+            - id: aftersale-service-api-docs
+              uri: lb://aftersale-service
+              predicates:
+                - Path=/aftersale-service/v3/api-docs
+              filters:
+                - RewritePath=/aftersale-service/(?<segment>.*), /$\{segment}
+            - id: user-service-api-docs
+              uri: lb://user-service
+              predicates:
+                - Path=/user-service/v3/api-docs
+              filters:
+                - RewritePath=/user-service/(?<segment>.*), /$\{segment}
+            - id: file-service-api-docs
+              uri: lb://file-service
+              predicates:
+                - Path=/file-service/v3/api-docs
+              filters:
+                - RewritePath=/file-service/(?<segment>.*), /$\{segment}
+            - id: system-service-api-docs
+              uri: lb://system-service
+              predicates:
+                - Path=/system-service/v3/api-docs
+              filters:
+                - RewritePath=/system-service/(?<segment>.*), /$\{segment}
+
+            # ===== 认证 → auth-service（登录 / 登出 / 当前管理员 / 验证码 / 个人中心） =====
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/login,/api/logout,/api/admin/info,/api/auth/captcha,/api/admin/profile,/api/admin/profile/**
+
+            # ===== 系统管理 + 监控 → system-service =====
+            - id: system-service
+              uri: lb://system-service
+              predicates:
+                - Path=/api/admin/system,/api/admin/system/**,/api/admin/monitor/**
+
+            # ===== 商品域 → product-service =====
+            - id: product-service
+              uri: lb://product-service
+              predicates:
+                - name: Path
+                  args:
+                    patterns:
+                      # 前台-首页 / 商品浏览
+                      - /api/home
+                      - /api/products
+                      - /api/products/**
+                      - /api/categories
+                      - /api/categories/**
+                      - /api/tags
+                      - /api/tags/**
+                      # 前台-收藏
+                      - /api/favorites
+                      - /api/favorites/**
+                      # 前台-文章
+                      - /api/articles
+                      - /api/articles/**
+                      # 后台-商品
+                      - /api/admin/products
+                      - /api/admin/products/**
+                      - /api/admin/categories
+                      - /api/admin/categories/**
+                      - /api/admin/tags
+                      - /api/admin/tags/**
+                      - /api/admin/specs
+                      - /api/admin/specs/**
+                      - /api/admin/stock
+                      - /api/admin/stock/**
+                      # 后台-营销
+                      - /api/admin/promotions
+                      - /api/admin/promotions/**
+                      - /api/admin/banners
+                      - /api/admin/banners/**
+                      - /api/banners
+                      - /api/banners/**
+                      # 后台-文章
+                      - /api/admin/articles
+                      - /api/admin/articles/**
+                      - /api/admin/article-categories
+                      - /api/admin/article-categories/**
+                      # 上传（商品图等）：/image/** 静态资源由 product-service 托管（common WebMvcConfig addResourceHandlers）
+                      - /api/admin/upload
+                      - /api/admin/upload/**
+                      - /api/upload
+                      - /api/upload/**
+                      - /image/**
+
+            # ===== 订单域 → order-service（优惠券 / 订单 / 评价 / 购物车 / 收货地址） =====
+            - id: order-service
+              uri: lb://order-service
+              predicates:
+                - name: Path
+                  args:
+                    patterns:
+                      # 优惠券域：C 端领券 + 后台券管理 + 秒杀退款审核
+                      - /api/coupons
+                      - /api/coupons/**
+                      - /api/admin/coupons
+                      - /api/admin/coupons/**
+                      - /api/admin/coupon-seckill-refunds
+                      - /api/admin/coupon-seckill-refunds/**
+                      # 订单域：C 端订单 + 后台订单 + 配送 + 快递 + 财务 + 报表
+                      - /api/orders
+                      - /api/orders/**
+                      - /api/admin/orders
+                      - /api/admin/orders/**
+                      - /api/admin/deliveries
+                      - /api/admin/deliveries/**
+                      - /api/admin/expresses
+                      - /api/admin/expresses/**
+                      - /api/admin/finance
+                      - /api/admin/finance/**
+                      - /api/admin/report
+                      - /api/admin/report/**
+                      # 评价域
+                      - /api/reviews
+                      - /api/reviews/**
+                      - /api/admin/reviews
+                      - /api/admin/reviews/**
+                      # 购物车
+                      - /api/cart
+                      - /api/cart/**
+                      # 收货地址
+                      - /api/address
+                      - /api/address/**
+
+            # ===== 售后域 → aftersale-service =====
+            - id: aftersale-service
+              uri: lb://aftersale-service
+              predicates:
+                - Path=/api/after-sales,/api/after-sales/**,/api/admin/after-sales,/api/admin/after-sales/**
+
+            # ===== AI 导购机器人 → Python ai-service（走静态地址，Docker 由 compose 的 AI_SERVICE_URL 覆盖） =====
+            - id: ai-service
+              uri: ${AI_SERVICE_URL:http://127.0.0.1:8000}
+              predicates:
+                - Path=/api/agent,/api/agent/**,/api/mall/ai/**,/api/admin/ai/**
+
+            # ===== AI 内部数据接口（Python → 网关 → 各服务，/internal/** 不对外） =====
+            - id: internal-ai-product
+              uri: lb://product-service
+              predicates:
+                - Path=/internal/ai/product/**,/internal/ai/products,/internal/ai/products/**,/internal/ai/stock/**
+            - id: internal-ai-order
+              uri: lb://order-service
+              predicates:
+                - Path=/internal/ai/orders,/internal/ai/orders/**
+            - id: internal-ai-aftersale
+              uri: lb://aftersale-service
+              predicates:
+                - Path=/internal/ai/aftersale/**
+
+            # ===== 后台来单提醒 WebSocket → order-service（前端 ws://网关/ws/order?token=xxx，握手鉴权在 order-service） =====
+            - id: order-service-ws
+              uri: lb://order-service
+              predicates:
+                - Path=/ws/**
+
+            # ===== 用户头像等上传文件 → user-service（/upload/** 静态资源，与 /image/** 对称，免登录） =====
+            - id: user-service-upload
+              uri: lb://user-service
+              predicates:
+                - Path=/upload/**
+
+            # ===== ⚠️ 兜底通配：其余 /api/** 暂转 user-service —— 必须放在所有业务路由之后 =====
+            - id: user-service
+              uri: lb://user-service
+              predicates:
+                - Path=/api/**
+              filters:
+                # 保留客户端原始 Host：user-service 用它拼头像等绝对 URL（UrlUtil.fullUrl）。
+                # 不保留时下游看到的 Host 是 lb 解析出的实例地址（如 192.168.92.1:9006），
+                # 而网关又会把 X-Forwarded-Host 覆盖成同一个实例地址，两个头都拿不到客户端域名 → 真机加载不到头像。
+                - PreserveHostHeader
+
+server:
+  port: 8080
+
+# Actuator：只暴露健康与指标，供 system-service 内网聚合；外部请求不转发 /actuator/**
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+
+# Swagger 文档聚合：一个入口 http://localhost:8080/swagger-ui.html，下拉切换各服务
+springdoc:
+  swagger-ui:
+    enabled: true
+    urls:
+      - name: 登录 auth-service
+        url: /auth-service/v3/api-docs
+      - name: 商品 product-service
+        url: /product-service/v3/api-docs
+      - name: 订单 order-service
+        url: /order-service/v3/api-docs
+      - name: 售后 aftersale-service
+        url: /aftersale-service/v3/api-docs
+      - name: 用户 user-service
+        url: /user-service/v3/api-docs
+      - name: 文件 file-service
+        url: /file-service/v3/api-docs
+      - name: 系统 system-service
+        url: /system-service/v3/api-docs

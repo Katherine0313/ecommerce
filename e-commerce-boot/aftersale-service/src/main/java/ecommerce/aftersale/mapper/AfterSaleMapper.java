@@ -1,0 +1,77 @@
+package ecommerce.aftersale.mapper;
+
+import ecommerce.aftersale.entity.AfterSale;
+import ecommerce.aftersale.vo.AfterSaleCountsVO;
+import org.apache.ibatis.annotations.Param;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * 售后单 Mapper（after_sales 表）。
+ * <p>
+ * 主表无 user_id，归属校验靠 LEFT JOIN orders 带出的 o.user_id，所以查询都 JOIN orders。
+ */
+public interface AfterSaleMapper {
+
+    // 创建售后单（回填自增 id）
+    int insert(AfterSale afterSale);
+
+    // 查单条售后（JOIN orders，含 user_id + 收货信息，不含软删除）
+    AfterSale findById(@Param("id") Long id);
+
+    // 查某用户的售后列表（JOIN orders 按 user_id 隔离，可选状态/关键词/时间范围筛选，按创建时间倒序）
+    List<AfterSale> listByUser(@Param("userId") Long userId,
+                               @Param("status") String status, @Param("search") String search,
+                               @Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                               @Param("dateField") String dateField);
+
+    // 分页查某用户的售后列表（筛选条件与 listByUser 一致）
+    List<AfterSale> listByUserPage(@Param("userId") Long userId,
+                                   @Param("status") String status, @Param("search") String search,
+                                   @Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                                   @Param("dateField") String dateField,
+                                   @Param("offset") int offset, @Param("pageSize") int pageSize);
+
+    // 某用户售后总数（与分页筛选条件一致）
+    long countByUser(@Param("userId") Long userId,
+                     @Param("status") String status, @Param("search") String search,
+                     @Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                     @Param("dateField") String dateField);
+
+    // 某用户售后各状态数量（一条聚合查询）
+    AfterSaleCountsVO countsByUser(@Param("userId") Long userId);
+
+    // 后台列表：查所有售后（不限用户，可选状态/关键词/时间范围筛选）
+    List<AfterSale> listByShop(@Param("status") String status, @Param("search") String search,
+                               @Param("start") LocalDateTime start, @Param("end") LocalDateTime end,
+                               @Param("dateField") String dateField);
+
+    // 按订单查最新一条售后（重复申请校验用，不含软删除）
+    AfterSale findByOrderId(@Param("orderId") Long orderId);
+
+    // 某订单项当前是否存在进行中的售后（reviewing/returning/refunding/exchanging）
+    int countActiveByOrderItem(@Param("orderItemId") Long orderItemId);
+
+    // 某订单当前是否存在进行中的售后（整单售后校验用）
+    int countActiveByOrder(@Param("orderId") Long orderId);
+
+    // 退款信息回落（金额快照 / 模拟退款单号 / 渠道）
+    int updateRefund(@Param("id") Long id,
+                     @Param("refundAmount") java.math.BigDecimal refundAmount,
+                     @Param("refundNo") String refundNo,
+                     @Param("refundChannel") String refundChannel,
+                     @Param("updatedAt") LocalDateTime updatedAt);
+
+    // 更新售后状态（主表只动 status + updated_at）
+    int updateStatus(@Param("id") Long id,
+                     @Param("status") String status, @Param("updatedAt") LocalDateTime updatedAt);
+
+    // 后台审核：更新状态 + 商家备注 + 更新时间
+    int updateStatusAndRemark(@Param("id") Long id,
+                              @Param("status") String status, @Param("merchantRemark") String merchantRemark,
+                              @Param("updatedAt") LocalDateTime updatedAt);
+
+    // 软删除主表（is_deleted = 1）
+    int softDelete(@Param("id") Long id, @Param("now") LocalDateTime now);
+}

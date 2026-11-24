@@ -1,0 +1,344 @@
+/**
+ * 整站响应式覆盖（不改 node_modules，全部靠后加载的样式覆盖）
+ * 断点：笔记本 <=1200px；手机 <=767px（手机同时命中两条，手机块必须写在后面）
+ */
+
+/* ==================== 笔记本：<=1200px ==================== */
+@media (max-width: 1200px) {
+  /* 内容区留白略收；tabs 的负 margin 同步，避免页签内容错位 */
+  .stepin-view .stepin-layout-content .stepin-view-main {
+    padding: 12px 12px 0;
+  }
+  .stepin-view .stepin-layout-content .stepin-view-main .stepin-tabs-view-content {
+    margin-left: -12px;
+    margin-right: -12px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* 1fr 网格项默认 min-width:auto，表格会把整页撑宽 */
+  .stepin-view .stepin-layout-content,
+  .stepin-view .stepin-view-main,
+  .stepin-view .stepin-tabs-view-content,
+  .stepin-view .stepin-tabs-view-content-main {
+    min-width: 0;
+  }
+
+  /* 顶栏压缩：隐藏 github、全屏（HeaderActions 里的语义 class） */
+  .stepin-header {
+    column-gap: 8px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .stepin-header-right .stepin-header-action {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .header-action-github,
+  .header-action-fullscreen {
+    display: none !important;
+  }
+
+  /* 筛选区：允许换行，消掉 400px 搜索框和 40px 外边距 */
+  .ant-form-inline {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ant-form-inline .ant-form-item {
+    /* 页面里有 margin:0 40px 的内联样式，一起压掉 */
+    margin: 0 12px 0 0 !important;
+  }
+  .ant-form-inline .ant-input-search {
+    width: 320px !important;
+    max-width: 100%;
+  }
+  /* 组件里 scoped 写的是 inline-flex，需要 !important 才能改成可换行 */
+  .date-range-select {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .date-range-select .ant-picker {
+    flex: 1 1 240px;
+    min-width: 0;
+    margin-left: 0 !important;
+  }
+
+  /* 表格：内容超宽时在容器内横向滚动，而不是撑破页面 */
+  .stepin-view-main .ant-table-wrapper .ant-table-content,
+  .stepin-view-main .ant-table-wrapper .ant-table-body {
+    overflow-x: auto;
+  }
+  .ant-modal .ant-table-content,
+  .ant-modal .ant-table-body {
+    overflow-x: auto;
+  }
+
+  /* 分页可换行，隐藏总条数文案 */
+  .ant-pagination {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .ant-pagination-total-text {
+    display: none;
+  }
+
+  /* 批量删除原来是绝对定位，窄屏会压住分页 */
+  .bat-delete-btn {
+    position: static !important;
+    margin-top: 12px;
+  }
+
+  /* 弹窗不超出视口，内容内部滚动 */
+  .ant-modal {
+    max-width: calc(100vw - 32px);
+  }
+  .ant-modal-body {
+    max-height: calc(100vh - 180px);
+    max-height: calc(100dvh - 180px);
+    overflow-y: auto;
+  }
+}
+
+/* ==================== 手机：<=767px ==================== */
+@media (max-width: 767px) {
+  /* 移动端地址栏伸缩用 dvh；保留 vh 给旧浏览器 */
+  html,
+  body,
+  #stepin-app,
+  .stepin-view {
+    height: 100vh;
+    height: 100dvh;
+  }
+  /* 防止个别固定宽度元素让整页左右晃动；页面内滚动交给表格/弹窗自己 */
+  .stepin-view {
+    overflow-x: hidden;
+  }
+  /* 登录/前台（blank 布局）不套侧栏，需要自己滚动，否则内容被 html/body 的 overflow:hidden 裁掉 */
+  .stepin-view.stepin-view-blank {
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+
+  /* 布局改单列；侧栏脱离 grid 改成抽屉 */
+  .stepin-view .stepin-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stepin-view .stepin-layout.side-nav > .stepin-layout-header {
+    grid-column-start: 1;
+  }
+  .stepin-view .stepin-layout.side-nav > .stepin-layout-content {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .stepin-view .stepin-layout-side {
+    position: fixed;
+    top: var(--height-header);
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 280px) !important;
+    height: auto;
+    padding-top: 8px !important;
+    overflow-y: auto;
+    z-index: 60;
+    transform: translateX(-105%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0.2s ease;
+    box-shadow: 4px 0 16px rgba(0, 0, 0, 0.18);
+  }
+  /* App.vue 里抽屉打开时加到 .stepin-view 上 */
+  .stepin-view.mobile-drawer-open .stepin-layout-side {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  .stepin-view .stepin-layout-side .ant-menu-inline {
+    width: 100% !important;
+  }
+
+  .mobile-drawer-mask {
+    position: fixed;
+    top: var(--height-header);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  /* 顶栏：只留日夜、铃铛、头像；用户名隐藏 */
+  .header-action-setting {
+    display: none !important;
+  }
+  .stepin-header {
+    column-gap: 2px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .stepin-header-right .stepin-header-action {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .stepin-header-right .personal .username {
+    display: none;
+  }
+
+  /* 内容留白再收紧 */
+  .stepin-view .stepin-layout-content .stepin-view-main {
+    padding: 10px 10px 0;
+  }
+  .stepin-view .stepin-layout-content .stepin-view-main .stepin-tabs-view-content {
+    margin-left: -10px;
+    margin-right: -10px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .ant-tabs-tab {
+    padding: 8px 10px !important;
+    font-size: 13px;
+  }
+
+  /* 卡片铺满一行；不能改 display，MiniStatisticCard 根节点是 .card + inline-flex */
+  .card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* 筛选表单一行一项 */
+  .ant-form-inline {
+    display: block;
+  }
+  .ant-form-inline .ant-form-item {
+    display: flex;
+    width: 100%;
+    margin: 0 0 10px !important;
+  }
+  .ant-form-inline .ant-form-item-control,
+  .ant-form-inline .ant-form-item-control-input {
+    width: 100%;
+  }
+  .ant-form-inline .ant-input,
+  .ant-form-inline .ant-input-search,
+  .ant-form-inline .ant-input-number,
+  .ant-form-inline .ant-select,
+  .ant-form-inline .ant-picker {
+    width: 100% !important;
+    max-width: none;
+  }
+  .ant-form-inline .ant-input-search-button {
+    width: 88px !important;
+  }
+  .ant-form-inline .date-range-select {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    width: 100%;
+    gap: 8px;
+  }
+  /* 手机上选择器和日期范围各占一行，避免日期选择框被压到只剩几十像素 */
+  .ant-form-inline .date-range-select > .ant-select {
+    width: 100% !important;
+    flex: 1 1 100%;
+  }
+  .ant-form-inline .date-range-select > .ant-picker {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-left: 0 !important;
+  }
+
+  /* 表格：字号缩小，给最小可读宽度后横向滚动 */
+  .ant-table {
+    font-size: 13px;
+  }
+  .stepin-view-main .ant-table-wrapper .ant-table-content > table {
+    min-width: 640px;
+  }
+  .ant-modal .ant-table-content > table {
+    min-width: 520px;
+  }
+  .ant-pagination-total-text,
+  .ant-pagination-options {
+    display: none !important;
+  }
+
+  /* 弹窗接近全屏，内容内部滚动 */
+  .ant-modal {
+    top: 8px !important;
+    max-width: calc(100vw - 16px);
+    margin: 0 auto;
+    padding-bottom: 8px;
+  }
+  .ant-modal-body {
+    max-height: calc(100vh - 150px);
+    max-height: calc(100dvh - 150px);
+    overflow-y: auto;
+  }
+  .ant-modal .ant-table-body {
+    max-height: 50vh !important;
+  }
+
+  /* 弹窗内表单：左侧标签改上下结构，避免 3/21 栅格把控件挤没 */
+  .ant-modal .ant-form-item-row {
+    display: block;
+  }
+  .ant-modal .ant-form-item-label,
+  .ant-modal .ant-form-item-control {
+    width: 100% !important;
+    max-width: none;
+    flex: none;
+    text-align: left;
+  }
+  .ant-modal .ant-form-item-label {
+    padding-bottom: 4px;
+  }
+  .ant-modal .ant-form-item-control-input .ant-input,
+  .ant-modal .ant-form-item-control-input .ant-select,
+  .ant-modal .ant-form-item-control-input .ant-picker,
+  .ant-modal .ant-form-item-control-input .ant-input-number {
+    width: 100% !important;
+    max-width: none;
+  }
+  /* 发货等弹窗里写死的 a-row + a-col :span=12，手机上强制单列 */
+  .ant-modal .ant-row .ant-col[class*='ant-col-'] {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  /* descriptions 标签宽度 160px 是内联样式，手机上放开并允许换行 */
+  .ant-descriptions-item-label {
+    width: auto !important;
+    min-width: 76px;
+    white-space: normal !important;
+  }
+  .ant-descriptions-item-content {
+    min-width: 0;
+    word-break: break-all;
+  }
+  /* 售后审核的横向步骤条太挤时横向滚动 */
+  .ant-modal .ant-steps {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  /* 日期范围下拉：两个日历竖向排列，否则超出屏幕 */
+  .ant-picker-dropdown {
+    max-width: calc(100vw - 12px);
+  }
+  .ant-picker-dropdown .ant-picker-panels {
+    flex-direction: column;
+  }
+  .ant-picker-dropdown .ant-picker-panel-container {
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+  }
+  .ant-select-dropdown {
+    max-width: calc(100vw - 24px);
+  }
+
+  /* 图片预览不超过屏幕 */
+  .ant-image-preview-img {
+    max-width: calc(100vw - 24px) !important;
+  }
+}

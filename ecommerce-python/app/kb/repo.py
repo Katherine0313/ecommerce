@@ -1,0 +1,195 @@
+"""知识库只读仓库 + 命中/未命中埋点。
+
+- 启动后整表加载到内存，60 秒缓存，运营改库后最多 1 分钟生效
+- hit_count / ai_kb_miss 写入失败只记日志，不影响回答
+"""
+
+import asyncio
+import logging
+import time
+from typing import Optional
+
+import pymysql
+from pymysql.cursors import DictCursor
+
+from app.config import settings
+from app.kb.matcher import KbEntry
+from app.kb.normalize import split_keywords
+
+logger = logging.getLogger(__name__)
+
+_cache_lock = asyncio.Lock()
+
+
+def _connect() -> pymysql.connections.Connection:
+    return pymysql.connect(
+        host=settings.mysql_host,
+        port=settings.mysql_port,
+        user=settings.db_username,
+        password=settings.db_password,
+        database=settings.mysql_database,
+        charset="utf8mb4",
+        cursorclass=DictCursor,
+        connect_timeout=3,
+        read_timeout=5,
+        autocommit=True,
+    )
+
+
+def _load_entries(scope: Optional[str] = None) -> list[KbEntry]:
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            if scope:
+                cursor.execute(
+                    """
+                    SELECT id, category, question, answer, keywords, priority, hit_count
+                    FROM ai_kb_qa
+                    WHERE status = 1 AND scope = %s
+                    ORDER BY priority DESC, id ASC
+                    """,
+                    (scope,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, category, question, answer, keywords, priority, hit_count
+                    FROM ai_kb_qa
+                    WHERE status = 1
+                    ORDER BY priority DESC, id ASC
+                    """
+                )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        KbEntry(
+            id=row["id"],
+            category=row["category"] or "",
+            question=row["question"],
+            answer=row["answer"],
+            keywords=split_keywords(row["keywords"]),
+            priority=int(row["priority"] or 0),
+            hit_count=int(row["hit_count"] or 0),
+        )
+        for row in rows
+    ]
+
+
+# 按 scope 分缓存，避免客服/运营知识库互相串扰
+_scope_cache: dict[str, list[KbEntry]] = {}
+_scope_cache_at: dict[str, float] = {}
+
+
+async def load_entries(scope: Optional[str] = None) -> list[KbEntry]:
+    """带缓存读取启用的知识条；库挂了就沿用旧缓存。"""
+    cache_key = scope or "__all__"
+    global _scope_cache, _scope_cache_at
+    now = time.monotonic()
+    cached = _scope_cache.get(cache_key)
+    cached_at = _scope_cache_at.get(cache_key, 0.0)
+    if cached and now - cached_at < settings.kb_cache_ttl:
+        return cached
+
+    async with _cache_lock:
+        now = time.monotonic()
+        cached = _scope_cache.get(cache_key)
+        cached_at = _scope_cache_at.get(cache_key, 0.0)
+        if cached and now - cached_at < settings.kb_cache_ttl:
+            return cached
+        try:
+            entries = await asyncio.to_thread(_load_entries, scope)
+            _scope_cache[cache_key] = entries
+            _scope_cache_at[cache_key] = time.monotonic()
+            logger.info("知识库缓存已刷新[scope=%s]：%s 条", scope, len(entries))
+        except Exception:
+            logger.exception("读取知识库失败[scope=%s]，沿用旧缓存", scope)
+    return _scope_cache.get(cache_key, [])
+
+
+def _record_hit(entry_id: int) -> None:
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE ai_kb_qa SET hit_count = hit_count + 1 WHERE id = %s", (entry_id,))
+    finally:
+        conn.close()
+
+
+async def record_hit(entry_id: int) -> None:
+    try:
+        await asyncio.to_thread(_record_hit, entry_id)
+    except Exception:
+        logger.warning("写入知识库命中次数失败 id=%s", entry_id, exc_info=True)
+
+
+# ---------- Excel 批量导入（app/kb/importer.py 配套，写路径） ----------
+
+def list_kb_keys() -> set[tuple[str, str, str]]:
+    """全表 (scope, category, question) 键集合：导入预检判重用（表小，全量拉取）。"""
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT scope, category, question FROM ai_kb_qa")
+            return {(r["scope"], r["category"], r["question"]) for r in cursor.fetchall()}
+    finally:
+        conn.close()
+
+
+def upsert_kb_entries_batch(rows: list[dict]) -> tuple[int, int]:
+    """批量 upsert（executemany 单事务，失败整体回滚）。
+
+    判重键 (scope, category, question) 命中唯一键 uk_ai_kb_scope_category_question 时
+    覆盖答案/关键词/优先级/状态，hit_count 不清零。返回 (新增数, 更新数)。
+    """
+    if not rows:
+        return 0, 0
+    existing = list_kb_keys()
+    inserted = sum(1 for r in rows if (r["scope"], r["category"], r["question"]) not in existing)
+    updated = len(rows) - inserted
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            conn.begin()
+            cursor.executemany(
+                """
+                INSERT INTO ai_kb_qa (scope, category, question, answer, keywords, priority, status)
+                VALUES (%(scope)s, %(category)s, %(question)s, %(answer)s, %(keywords)s, %(priority)s, %(status)s)
+                ON DUPLICATE KEY UPDATE
+                    answer = VALUES(answer),
+                    keywords = VALUES(keywords),
+                    priority = VALUES(priority),
+                    status = VALUES(status)
+                """,
+                [
+                    {
+                        "scope": r["scope"],
+                        "category": r["category"],
+                        "question": r["question"],
+                        "answer": r["answer"],
+                        "keywords": r["keywords"],
+                        "priority": int(r["priority"]),
+                        "status": int(r["status"]),
+                    }
+                    for r in rows
+                ],
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return inserted, updated
+
+
+def clear_kb_cache(scopes: Optional[list[str]] = None) -> None:
+    """导入/变更后主动清缓存，新条目立即生效（否则最多延迟 kb_cache_ttl 秒）。"""
+    if scopes:
+        for key in scopes:
+            _scope_cache.pop(key, None)
+            _scope_cache_at.pop(key, None)
+    else:
+        _scope_cache.clear()
+        _scope_cache_at.clear()

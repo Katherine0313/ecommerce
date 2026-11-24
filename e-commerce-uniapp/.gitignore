@@ -1,0 +1,26 @@
+unpackage/
+.DS_Store
+.hbuilderx/
+node_modules/
+
+# 环境变量（不要提交）
+.env
+.env.*
+!.env.example
+
+# 编辑器 / IDE / AI 工具
+.idea/
+.vscode/
+.claude/
+.trae-html-share-packages/
+.workbuddy/
+
+# 日志
+*.log
+logs/
+
+# 操作系统
+Thumbs.db
+
+# 编辑器 / IDE / AI 工具（不要提交）
+.trae/

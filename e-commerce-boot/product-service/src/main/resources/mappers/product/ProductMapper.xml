@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.product.mapper.ProductMapper">
+    <!-- 上架商品列表：不查 body（大字段）和 cost_price（C 端不下发成本价）
+         安全上限 200：老接口不分页（前端已迁移到 /api/products/page），这里兜底防止全量返回拖垮小程序 -->
+    <select id="listOnSale" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image,
+               sales_mode, listing_status, sales_price, market_price, product_code, stock, specs,
+               create_time, update_time
+        FROM products
+        WHERE listing_status = 1
+        ORDER BY id ASC
+        LIMIT 200
+    </select>
+
+    <!-- 与 PromotionServiceImpl.applyDisplay 同口径：当前生效、全员、直减且活动价低于售价 -->
+    <sql id="hasDisplayPromotion">
+        EXISTS (
+            SELECT 1
+            FROM promotion_item pi
+            JOIN promotion pr ON pr.id = pi.promotion_id
+            WHERE pi.product_id = p.id
+              AND pi.promotion_price &lt; p.sales_price
+              AND pr.is_deleted = 0
+              AND pr.manual_status = 0
+              AND pr.type = 'DIRECT'
+              AND pr.target_group != 'NEW_USER'
+              AND pr.start_time &lt;= #{now}
+              AND pr.end_time &gt; #{now}
+        )
+    </sql>
+
+    <!-- 全部上架商品 id（不截断）：活动商品优先，供首页 feed 组装顺序与真实总数 -->
+    <select id="listOnSaleIds" resultType="java.lang.Long">
+        SELECT p.id
+        FROM products p
+        WHERE p.listing_status = 1
+        ORDER BY
+        <if test="promotionFirst">
+            CASE WHEN <include refid="hasDisplayPromotion"/> THEN 0 ELSE 1 END,
+        </if>
+        p.id ASC
+    </select>
+
+    <!-- 按 id 批量查上架商品（feed 单页用，不含 body/cost_price）；返回顺序由调用方按 feed 顺序重排 -->
+    <select id="listOnSaleByIds" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image,
+               sales_mode, listing_status, sales_price, market_price, product_code, stock, specs,
+               create_time, update_time
+        FROM products
+        WHERE listing_status = 1
+          AND id IN
+          <foreach collection="ids" item="id" open="(" separator="," close=")">
+              #{id}
+          </foreach>
+    </select>
+
+    <!-- 商品详情：查 body，仍不下发 cost_price -->
+    <select id="findById" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image, body,
+               sales_mode, listing_status, sales_price, market_price, product_code, stock, specs,
+               sku_type, sku_specs,
+               create_time, update_time
+        FROM products
+        WHERE id = #{id}
+    </select>
+
+    <!-- 按分类查上架商品：categoryId 可以是一级或二级，一级时包含其所有二级的商品 -->
+    <select id="listOnSaleByCategory" resultType="ecommerce.product.entity.Product">
+        SELECT p.id, p.category_id, p.tag_id, p.name, p.sub_title, p.brand, p.title, p.image,
+               p.sales_mode, p.listing_status, p.sales_price, p.market_price, p.product_code, p.stock, p.specs,
+               p.create_time, p.update_time
+        FROM products p
+        WHERE p.listing_status = 1
+          AND p.category_id IN (
+              SELECT id FROM categories WHERE id = #{categoryId} OR parent_id = #{categoryId}
+          )
+        ORDER BY p.id ASC
+        LIMIT 200
+    </select>
+
+    <!-- 按关键词搜索上架商品：匹配商品名/副标题/品牌，不含 body/cost_price -->
+    <select id="searchOnSale" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image,
+               sales_mode, listing_status, sales_price, market_price, product_code, stock, specs,
+               create_time, update_time
+        FROM products
+        WHERE listing_status = 1
+          AND (name LIKE CONCAT('%', #{keyword}, '%')
+               OR sub_title LIKE CONCAT('%', #{keyword}, '%')
+               OR brand LIKE CONCAT('%', #{keyword}, '%'))
+        ORDER BY id ASC
+        LIMIT 200
+    </select>
+
+    <!-- 活动商品优先、组内随机；excludeIds 排除当前已展示的，避免刷新后大量重复 -->
+    <select id="listRandomOnSale" resultType="ecommerce.product.entity.Product">
+        SELECT p.id, p.category_id, p.tag_id, p.name, p.sub_title, p.brand, p.title, p.image,
+               p.sales_mode, p.listing_status, p.sales_price, p.market_price, p.product_code, p.stock, p.specs,
+               p.create_time, p.update_time
+        FROM products p
+        WHERE p.listing_status = 1
+        <if test="excludeIds != null and excludeIds.size() > 0">
+            AND p.id NOT IN
+            <foreach collection="excludeIds" item="id" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+        </if>
+        ORDER BY
+        <if test="promotionFirst">
+            CASE WHEN <include refid="hasDisplayPromotion"/> THEN 0 ELSE 1 END,
+        </if>
+        RAND()
+        LIMIT #{limit}
+    </select>
+
+    <!-- 随机取「推荐分类」下的上架商品：分类自身或父分类 recommend=1 -->
+    <select id="listRandomOnSaleByRecommendedCategory" resultType="ecommerce.product.entity.Product">
+        SELECT p.id, p.category_id, p.tag_id, p.name, p.sub_title, p.brand, p.title, p.image,
+               p.sales_mode, p.listing_status, p.sales_price, p.market_price, p.product_code, p.stock, p.specs,
+               p.create_time, p.update_time
+        FROM products p
+        JOIN categories c ON p.category_id = c.id
+        LEFT JOIN categories parent ON c.parent_id = parent.id
+        WHERE p.listing_status = 1
+          AND (c.recommend = 1 OR parent.recommend = 1)
+        <if test="excludeIds != null and excludeIds.size() > 0">
+            AND p.id NOT IN
+            <foreach collection="excludeIds" item="id" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+        </if>
+        ORDER BY RAND()
+        LIMIT #{limit}
+    </select>
+
+    <!-- C 端分页查询共用 FROM/WHERE：pageOnSale 与 countOnSale 必须共用，避免筛选条件漂移 -->
+    <sql id="onSalePageWhere">
+        FROM products p
+        WHERE p.listing_status = 1
+        <if test="categoryId != null">
+            AND p.category_id IN (
+                SELECT id FROM categories WHERE id = #{categoryId} OR parent_id = #{categoryId}
+            )
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (p.name LIKE CONCAT('%', #{keyword}, '%')
+                 OR p.sub_title LIKE CONCAT('%', #{keyword}, '%')
+                 OR p.brand LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="brand != null and brand != ''">
+            AND p.brand = #{brand}
+        </if>
+        <if test="minPrice != null">
+            AND p.sales_price &gt;= #{minPrice}
+        </if>
+        <if test="maxPrice != null">
+            AND p.sales_price &lt;= #{maxPrice}
+        </if>
+    </sql>
+
+    <!-- C 端分页商品列表：排序走白名单，禁止拼接 ${sort} -->
+    <select id="pageOnSale" resultType="ecommerce.product.entity.Product">
+        SELECT p.id, p.category_id, p.tag_id, p.name, p.sub_title, p.brand, p.title, p.image,
+               p.sales_mode, p.listing_status, p.sales_price, p.market_price, p.product_code, p.stock, p.specs,
+               p.create_time, p.update_time
+        <include refid="onSalePageWhere"/>
+        ORDER BY
+        <choose>
+            <when test="sort == 'price_asc'">p.sales_price ASC, p.id ASC</when>
+            <when test="sort == 'price_desc'">p.sales_price DESC, p.id DESC</when>
+            <otherwise>p.id DESC</otherwise>
+        </choose>
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- C 端分页总数 -->
+    <select id="countOnSale" resultType="long">
+        SELECT COUNT(*)
+        <include refid="onSalePageWhere"/>
+    </select>
+
+    <!-- ==================== 后台管理 ==================== -->
+
+    <!-- 后台商品列表：含下架、含 cost_price 与 body（编辑回填需要）；分页 + 可选关键词/分类筛选 -->
+    <select id="listAdmin" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image, body,
+               sales_mode, listing_status, sales_price, market_price, cost_price, product_code, stock, specs,
+               sku_type, sku_specs,
+               create_time, update_time
+        FROM products
+        <where>
+            <if test="search != null and search != ''">
+                (name LIKE CONCAT('%', #{search}, '%')
+                 OR sub_title LIKE CONCAT('%', #{search}, '%')
+                 OR brand LIKE CONCAT('%', #{search}, '%'))
+            </if>
+            <if test="categoryId != null">
+                AND category_id IN (
+                    SELECT id FROM categories WHERE id = #{categoryId} OR parent_id = #{categoryId}
+                )
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- 后台商品总数（与 listAdmin 同筛选条件，分页 total 用） -->
+    <select id="countAdmin" resultType="long">
+        SELECT COUNT(*)
+        FROM products
+        <where>
+            <if test="search != null and search != ''">
+                (name LIKE CONCAT('%', #{search}, '%')
+                 OR sub_title LIKE CONCAT('%', #{search}, '%')
+                 OR brand LIKE CONCAT('%', #{search}, '%'))
+            </if>
+            <if test="categoryId != null">
+                AND category_id IN (
+                    SELECT id FROM categories WHERE id = #{categoryId} OR parent_id = #{categoryId}
+                )
+            </if>
+        </where>
+    </select>
+
+    <!-- 后台商品详情：含 cost_price -->
+    <select id="findByIdAdmin" resultType="ecommerce.product.entity.Product">
+        SELECT id, category_id, tag_id, name, sub_title, brand, title, image, body,
+               sales_mode, listing_status, sales_price, market_price, cost_price, product_code, stock, specs,
+               sku_type, sku_specs,
+               create_time, update_time
+        FROM products
+        WHERE id = #{id}
+    </select>
+
+    <!-- 新增商品，自增 id 回填到 product.id -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO products
+            (category_id, tag_id, name, sub_title, brand, title, image, body,
+             sales_mode, listing_status, sales_price, market_price, cost_price, product_code, stock, specs,
+             sku_type, sku_specs, create_time, update_time)
+        VALUES
+            (#{categoryId}, #{tagId}, #{name}, #{subTitle}, #{brand}, #{title}, #{image}, #{body},
+             #{salesMode}, #{listingStatus}, #{salesPrice}, #{marketPrice}, #{costPrice}, #{productCode}, #{stock},
+             #{specs}, #{skuType}, #{skuSpecs}, #{createTime}, #{updateTime})
+    </insert>
+
+    <update id="clearCategory">
+        UPDATE products SET category_id = NULL, update_time = #{updateTime} WHERE id = #{id}
+    </update>
+
+    <!-- 更新商品：动态 set，只更新非 null 字段（上架开关只传 listing_status 即可）；update_time 用 Java 传参 -->
+    <update id="update">
+        UPDATE products
+        <set>
+            <if test="categoryId != null">category_id = #{categoryId},</if>
+            <if test="tagId != null">tag_id = #{tagId},</if>
+            <if test="name != null">name = #{name},</if>
+            <if test="subTitle != null">sub_title = #{subTitle},</if>
+            <if test="brand != null">brand = #{brand},</if>
+            <if test="title != null">title = #{title},</if>
+            <if test="image != null">image = #{image},</if>
+            <if test="body != null">body = #{body},</if>
+            <if test="salesMode != null">sales_mode = #{salesMode},</if>
+            <if test="listingStatus != null">listing_status = #{listingStatus},</if>
+            <if test="salesPrice != null">sales_price = #{salesPrice},</if>
+            <if test="marketPrice != null">market_price = #{marketPrice},</if>
+            <if test="costPrice != null">cost_price = #{costPrice},</if>
+            <if test="productCode != null">product_code = #{productCode},</if>
+            <if test="stock != null">stock = #{stock},</if>
+            <if test="specs != null">specs = #{specs},</if>
+            <if test="skuType != null">sku_type = #{skuType},</if>
+            <if test="skuSpecs != null">sku_specs = #{skuSpecs},</if>
+            update_time = #{updateTime},
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 删除商品 -->
+    <delete id="delete">
+        DELETE FROM products WHERE id = #{id}
+    </delete>
+
+    <!-- 品牌列表：去重、非空 -->
+    <select id="listBrands" resultType="string">
+        SELECT DISTINCT brand
+        FROM products
+        WHERE brand IS NOT NULL AND brand != ''
+        ORDER BY brand ASC
+    </select>
+
+    <!-- 工作台统计：商品总数 / 总库存 / 库存总价值（售价 × 库存） -->
+    <select id="dashboardStats" resultType="ecommerce.product.vo.DashboardVO">
+        SELECT COUNT(*) AS total_products,
+               CAST(COALESCE(SUM(stock), 0) AS SIGNED) AS total_stock,
+               COALESCE(SUM(sales_price * stock), 0) AS total_value
+        FROM products
+    </select>
+
+    <!-- ==================== AI 内部接口（/internal/ai/**） ==================== -->
+
+    <!-- 商品累计销量：口径与 order-service 销量排名一致（排除待付款/已取消，按已支付订单计） -->
+    <select id="sumSalesByProductId" resultType="long">
+        SELECT COALESCE(SUM(oi.quantity), 0)
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE oi.is_deleted = 0
+          AND o.is_deleted = 0
+          AND o.order_status NOT IN (1, 6)
+          AND o.pay_at IS NOT NULL
+          AND oi.product_id = #{productId}
+    </select>
+
+    <!-- 批量商品累计销量：返回 [{productId, sales}]，AI 商品列表一次装配用 -->
+    <select id="sumSalesByProductIds" resultType="map">
+        SELECT oi.product_id AS productId, COALESCE(SUM(oi.quantity), 0) AS sales
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        WHERE oi.is_deleted = 0
+          AND o.is_deleted = 0
+          AND o.order_status NOT IN (1, 6)
+          AND o.pay_at IS NOT NULL
+          AND oi.product_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        GROUP BY oi.product_id
+    </select>
+</mapper>

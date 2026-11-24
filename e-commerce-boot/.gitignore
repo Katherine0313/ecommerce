@@ -1,0 +1,81 @@
+### 依赖 / 构建产物 ###
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+node_modules/
+dist/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Claude Code 本地配置 ###
+.claude/
+
+### 个人文档（简历等，绝不入库） ###
+*.docx
+
+### 本地配置与密钥（不要提交） ###
+application-dev.yml
+.env
+.env.*
+!.env.example
+HELP.md
+.mvn/wrapper/maven-wrapper.jar
+
+### 文档：只保留 sql 迁移脚本 / 规划三件套 / 图片资源 ###
+docs/*
+!docs/sql/
+!docs/planning/
+!docs/images/
+
+### 生产部署密钥（不要提交）###
+deploy/.env
+
+### 运行期生成 ###
+upload/
+
+### 本地临时文件 / 日志 / 打包产物 ###
+.local/
+.tmp/
+.tmp-*
+.screenshots/
+logs/
+*.log
+dump.rdb
+*.tgz
+*.tar.gz
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 编辑器 / IDE / AI 工具（不要提交）
+.idea/
+.trae/
+.trae-html-share-packages/
+.workbuddy/

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.order.mapper.CouponSeckillRefundMapper">
+
+    <sql id="columns">
+        id, refund_no, seckill_order_id, user_id, coupon_user_id, refund_amount, status,
+        reason, images, merchant_remark, create_time, refund_time, update_time
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO coupon_seckill_refund
+            (refund_no, seckill_order_id, user_id, coupon_user_id, refund_amount, status,
+             reason, images, create_time)
+        VALUES
+            (#{refundNo}, #{seckillOrderId}, #{userId}, #{couponUserId}, #{refundAmount}, #{status},
+             #{reason}, #{images}, #{createTime})
+    </insert>
+
+    <select id="findById" resultType="ecommerce.order.entity.CouponSeckillRefund">
+        SELECT <include refid="columns"/>
+        FROM coupon_seckill_refund
+        WHERE id = #{id}
+    </select>
+
+    <select id="findBySeckillOrderId" resultType="ecommerce.order.entity.CouponSeckillRefund">
+        SELECT <include refid="columns"/>
+        FROM coupon_seckill_refund
+        WHERE seckill_order_id = #{seckillOrderId}
+    </select>
+
+    <update id="approveById">
+        UPDATE coupon_seckill_refund
+        SET status = 'APPROVING', update_time = #{now}
+        WHERE id = #{id} AND status = 'REVIEWING'
+    </update>
+
+    <update id="finishRefund">
+        UPDATE coupon_seckill_refund
+        SET status = 'REFUNDED', refund_time = #{now}, update_time = #{now}
+        WHERE id = #{id} AND status = 'APPROVING'
+    </update>
+
+    <update id="rejectById">
+        UPDATE coupon_seckill_refund
+        SET status = 'REJECTED', merchant_remark = #{merchantRemark}, update_time = #{now}
+        WHERE id = #{id} AND status = 'REVIEWING'
+    </update>
+
+    <select id="listAdmin" resultType="ecommerce.order.vo.AdminCouponRefundVO">
+        SELECT r.id, r.refund_no, r.seckill_order_id, o.order_no, o.coupon_name,
+               r.user_id, u.name AS user_name, u.phone, r.coupon_user_id,
+               r.refund_amount, r.status, r.reason, r.images, r.merchant_remark,
+               r.create_time, r.refund_time
+        FROM coupon_seckill_refund r
+                 LEFT JOIN coupon_seckill_order o ON o.id = r.seckill_order_id
+                 LEFT JOIN `user` u ON u.id = r.user_id
+        <where>
+            <if test="status != null and status != ''">
+                r.status = #{status}
+            </if>
+        </where>
+        ORDER BY r.id DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="countAdmin" resultType="long">
+        SELECT COUNT(*)
+        FROM coupon_seckill_refund r
+        <where>
+            <if test="status != null and status != ''">
+                r.status = #{status}
+            </if>
+        </where>
+    </select>
+
+</mapper>

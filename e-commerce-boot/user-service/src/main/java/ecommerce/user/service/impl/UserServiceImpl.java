@@ -1,0 +1,438 @@
+package ecommerce.user.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import ecommerce.user.vo.UserProfileVO;
+import ecommerce.user.vo.UserStatisticsVO;
+import ecommerce.utils.JwtUtil;
+import ecommerce.utils.MediaMagic;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import ecommerce.exception.BusinessException;
+import ecommerce.user.entity.User;
+import ecommerce.user.mapper.CartMapper;
+import ecommerce.user.mapper.UserMapper;
+import ecommerce.user.service.UserService;
+import ecommerce.user.support.PhoneCodeStore;
+import ecommerce.user.vo.WxLoginVO;
+import ecommerce.properties.WeChatProperties;
+import ecommerce.utils.HttpClientUtil;
+import ecommerce.utils.WeChatAccessTokenProvider;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.IOException;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Pattern;
+
+@Slf4j
+@Service
+public class UserServiceImpl implements UserService {
+    private final WeChatProperties weChatProperties;
+    private final HttpClientUtil httpClientUtil;
+    private final ObjectMapper objectMapper;
+    private final UserMapper userMapper;
+    private final CartMapper cartMapper;
+    private final JwtUtil jwtUtil;
+    /** 微信 access_token 统一走 Redis 共享缓存，避免与 order-service 互相刷失效 */
+    private final WeChatAccessTokenProvider weChatAccessTokenProvider;
+    /** PC 短信验证码存取（与登录共用同一份 key） */
+    private final PhoneCodeStore phoneCodeStore;
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^1\\d{10}$");
+
+
+    public UserServiceImpl(WeChatProperties weChatProperties, HttpClientUtil httpClientUtil,
+                           ObjectMapper objectMapper, UserMapper userMapper, CartMapper cartMapper,
+                           JwtUtil jwtUtil, WeChatAccessTokenProvider weChatAccessTokenProvider,
+                           PhoneCodeStore phoneCodeStore) {
+        this.weChatProperties = weChatProperties;
+        this.httpClientUtil = httpClientUtil;
+        this.objectMapper = objectMapper;
+        this.userMapper = userMapper;
+        this.cartMapper = cartMapper;
+        this.jwtUtil = jwtUtil;
+        this.weChatAccessTokenProvider = weChatAccessTokenProvider;
+        this.phoneCodeStore = phoneCodeStore;
+
+    }
+
+    @Override
+    public WxLoginVO login(String code) {
+        // 0. 校验 code：wx.login() 拿到的临时凭证不能为空
+        if (code == null || code.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "登录凭证 code 不能为空");
+        }
+        // 1. code 换 openid
+        Map<String, String> map = new HashMap<>();
+        map.put("appid", weChatProperties.getAppid());
+        map.put("secret", weChatProperties.getSecret());
+        map.put("js_code", code);
+        map.put("grant_type", "authorization_code");
+        String respBody = httpClientUtil.doGet("https://api.weixin.qq.com/sns/jscode2session", map);
+        // 2. 解析微信返回的 openid，code 无效时微信会返回 errcode 而没有 openid
+        JsonNode respNode = objectMapper.readTree(respBody);
+        JsonNode openidNode = respNode.get("openid");
+        String openid;
+        if (openidNode != null) {
+            openid = openidNode.stringValue();
+        } else if (weChatProperties.isDevMockEnabled() && respNode.path("errcode").asInt() == 40164) {
+            // 本地开发兜底：公网出口 IP 经常变、不在微信白名单时，用固定 mock openid 走完登录流程。
+            // 仅 dev-mock-enabled=true（本地配置）时生效，生产环境关闭。
+            log.warn("微信登录被 IP 白名单拦截(errcode=40164)，开发环境使用 mock openid 登录");
+            openid = "dev_mock_openid";
+        } else {
+            // 只记录微信错误码/文案，不记录 openid/session_key
+            log.warn("微信 jscode2session 失败 errcode={} errmsg={}",
+                    respNode.path("errcode").asText(""), respNode.path("errmsg").asText(""));
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "登录凭证 code 无效或已过期");
+        }
+        // 3. 按 openid 查用户，查不到（首次登录）就自动注册
+        // 不加 is_deleted 过滤（注销用户 openid 仍占 uk_openid，查不到会撞键）
+        User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getOpenid, openid));
+        if (user == null) {
+            user = User.builder().openid(openid).build();
+            userMapper.insert(user); // BaseMapper.insert 自动回填自增 id
+        } else if (isDeleted(user)) {
+            // 已注销用户禁止再登录（新注册用户 is_deleted 走库默认 0，不会走到这）
+            throw new BusinessException(HttpStatus.FORBIDDEN, "账号已注销");
+        }
+        // 4. 生成 token 返回给调用方
+        return WxLoginVO.builder()
+                .token(jwtUtil.generateUserToken(user.getId()))
+                .id(user.getId())
+                .avatar(user.getAvatar())
+                .build();
+    }
+
+    // 绑定手机号：PC 端走 phone + 短信验证码；微信端走 getPhoneNumber 授权 code
+    @Override
+    public String bindPhone(Long userId, String phone, String code) {
+        // phone 为空 = 微信小程序流程，保持原逻辑向后兼容
+        if (phone == null || phone.isBlank()) {
+            return bindPhoneByWxCode(userId, code);
+        }
+        String targetPhone = phone.trim();
+        if (!PHONE_PATTERN.matcher(targetPhone).matches()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "请输入正确的手机号");
+        }
+        if (code == null || code.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "验证码不能为空");
+        }
+        findActiveUser(userId);
+        // 取出即删除，验证码一次性使用；Redis 异常单独提示，避免误报成「验证码错误」
+        String saved;
+        try {
+            saved = phoneCodeStore.take(targetPhone);
+        } catch (RuntimeException e) {
+            log.error("PC 绑定手机号读取验证码失败", e);
+            throw new BusinessException(HttpStatus.INTERNAL_SERVER_ERROR, "验证码服务暂不可用，请稍后重试");
+        }
+        if (saved == null || !saved.equals(code.trim())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "验证码错误或已过期");
+        }
+        // 手机号已被他人占用时拒绝，避免把别人的手机号绑到自己账号
+        User owner = userMapper.findForLoginByPhone(targetPhone);
+        if (owner != null && !owner.getId().equals(userId)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "该手机号已被其他账号绑定");
+        }
+        userMapper.updateById(User.builder().id(userId).phone(targetPhone).build());
+        return targetPhone;
+    }
+
+    /** 微信小程序：用 getPhoneNumber 授权 code 换手机号并写库 */
+    private String bindPhoneByWxCode(Long userId, String code) {
+        // 1. 手机号授权 code 不能为空
+        if (code == null || code.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "手机号授权 code 不能为空");
+        }
+        // 2. 用户必须存在且未注销
+        findActiveUser(userId);
+        // 3. code 换手机号：先取 access_token（Redis 共享缓存），再调 getuserphonenumber（POST JSON）
+        String accessToken = weChatAccessTokenProvider.getAccessToken();
+        String url = "https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=" + accessToken;
+        String respBody = httpClientUtil.doPostJson(url, objectMapper.writeValueAsString(Map.of("code", code)));
+        JsonNode node = objectMapper.readTree(respBody);
+        // 4. 微信 errcode 非 0 即失败（code 无效/过期、无权限等）
+        int errcode = node.path("errcode").asInt(0);
+        if (errcode != 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "获取手机号失败：" + node.path("errmsg").asText(""));
+        }
+        // 5. 取纯手机号（不含国家码）写库
+        String phone = node.path("phone_info").path("purePhoneNumber").asText(null);
+        if (phone == null || phone.isBlank()) {
+            throw new BusinessException("微信未返回手机号");
+        }
+        // updateById 只更新非 null 字段，update_time 由 MyMetaObjectHandler 自动填充
+        userMapper.updateById(User.builder().id(userId).phone(phone).build());
+        return phone;
+    }
+
+    //查询用户，用户不存在就报错；查到了就把实体数据组装成 VO 返回，给前端展示个人资料（包含头像）。
+    @Override
+    public UserProfileVO getProfile(Long userId) {
+        // 1. 取用户：不存在或已注销都视为不可用（令牌可能还在有效期内，靠这里兜住）
+        User user = findActiveUser(userId);
+        // 2.构建vo对象，最终返回给前端
+        return UserProfileVO.builder()
+                .id(user.getId())
+                .name(user.getName())
+                .username(user.getUsername())
+                .avatar(user.getAvatar())
+                .phone(user.getPhone())
+                .sex(user.getSex())
+                .createTime(user.getCreateTime())
+                .build();
+    }
+
+    // 设置昵称：校验后写入 user.name，返回去除首尾空格后的昵称
+    @Override
+    public String updateName(Long userId, String name) {
+        // 1. 昵称不能为空（null 或纯空格都不行）
+        if (name == null || name.isBlank()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "昵称不能为空");
+        }
+        // 2. 去掉首尾空格，避免脏数据入库
+        String trimmed = name.trim();
+        // 3. 长度上限：与库 name varchar(32) 对齐，避免超长写库报错
+        if (trimmed.length() > 32) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "昵称不能超过 32 个字符");
+        }
+        // 4. 用户必须存在且未注销（登录态有效但账号可能已注销），否则更新影响 0 行
+        findActiveUser(userId);
+        // 5. 写库，返回最终入库的昵称
+        userMapper.updateById(User.builder().id(userId).name(trimmed).build());
+        return trimmed;
+    }
+
+    // 更新头像：写 user.avatar 字段。avatar 为空字符串即清除头像；null 不做更新
+    @Override
+    public String updateAvatar(Long userId, String avatar) {
+        // 头像路径：允许相对路径（/image/upload/xxx.webp）或完整 URL，校验不为 null
+        // 前端可能传空字符串表示清除头像，不拦截
+        findActiveUser(userId);
+        String normalized = avatar == null ? "" : avatar.trim();
+        userMapper.updateById(User.builder().id(userId).avatar(normalized).build());
+        return normalized;
+    }
+
+    // 注销账号：软删用户 + 清购物车，同一事务（任一步失败一起回滚）
+    @Override
+    @Transactional
+    public void deactivate(Long userId) {
+        // 1. 用户必须存在且未注销，否则抛 401（重复注销在这里就被挡住）
+        findActiveUser(userId);
+        // 2. 置 is_deleted = 1（不物理删：orders.user_id 是 RESTRICT，订单要保留）
+        // 软删：is_deleted=0 条件保证重复注销不重复计数；传 new User() 触发 updateFill 填 update_time
+        userMapper.update(new User(), new LambdaUpdateWrapper<User>()
+                .eq(User::getId, userId).eq(User::getIsDeleted, 0)
+                .set(User::getIsDeleted, 1));
+        // 3. 清空该用户购物车（cart 同库直连删；订单/收货地址不动，地址快照已冗余进订单）
+        cartMapper.deleteByUser(userId);
+    }
+
+
+    /**
+     * 头像上传目录（相对运行目录），与 WebMvcConfig 的静态映射保持一致
+     */
+
+    private static final String UPLOAD_DIR = "upload/avatar/";
+
+    /**
+     * 允许上传的图片类型 → 落盘后缀
+     * <p>
+     * 用白名单而不是 contentType.startsWith("image/")：后者会放行 image/svg+xml，
+     * 而 SVG 能内嵌脚本，配上 /upload/** 的静态直接访问就是 XSS；
+     * 另外白名单直接给出规范后缀，避免从 Content-Type 里切出 "svg+xml" 这种非法扩展名。
+     */
+    private static final Map<String, String> ALLOWED_IMAGE_TYPES = Map.of(
+            "image/png", "png",
+            "image/jpeg", "jpg",
+            "image/gif", "gif",
+            "image/webp", "webp"
+    );
+
+    /**
+     * 头像体积上限（2MB）：与 user-service 的 multipart max-file-size 对齐。
+     * 容器层是总闸，这里再卡一道给出更精确的提示（区分「头像」而不是笼统的「上传文件过大」）。
+     */
+    private static final long MAX_AVATAR_BYTES = 2L * 1024 * 1024;
+
+    @Override
+    public String uploadAvatar(Long userId, MultipartFile file) {
+        // 只收白名单内的图片类型；Content-Type 由客户端提供，大小写和参数都可能不规范，先归一化
+        String contentType = normalizeContentType(file.getContentType());
+        String suffix = contentType == null ? null : ALLOWED_IMAGE_TYPES.get(contentType);
+        if (suffix == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "只支持 png / jpg / gif / webp 格式的图片");
+        }
+        // 魔数校验：Content-Type 是客户端填的可以伪造，读文件头确认真实类型，不一致直接拒绝
+        MediaMagic.assertRealType(file, suffix);
+        // 体积兜底
+        if (file.getSize() > MAX_AVATAR_BYTES) {
+            throw new BusinessException(HttpStatus.PAYLOAD_TOO_LARGE, "头像不能超过 2MB");
+        }
+        // 上传前先记下旧头像路径，等新文件保存成功后再删旧文件，避免反复上传堆满磁盘
+        String oldAvatar = findActiveUser(userId).getAvatar();
+
+        // 保存文件：upload/avatar/{userId}_{时间戳}.{后缀}
+        String filename = userId + "_" + System.currentTimeMillis() + "." + suffix;
+        File dir = new File(UPLOAD_DIR);
+        if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+            // 目录创建失败（磁盘满 / 权限不足），直接报错，别让后面的 IO 异常变得没头没脑
+            throw new BusinessException("存储目录不可用，请联系管理员");
+        }
+        File target = new File(dir, filename);
+        try {
+            file.transferTo(target.toPath());
+        } catch (IOException e) {
+            throw new BusinessException("头像保存失败");
+        }
+        // 落盘后校验文件真的写出来了：避免接口返回成功但磁盘上是空文件
+        if (!target.isFile() || target.length() <= 0) {
+            throw new BusinessException("头像保存失败");
+        }
+        // 库里存相对路径，完整 URL 由 Controller 按当前请求域名拼
+        String relativeUrl = "/upload/avatar/" + filename;
+        userMapper.updateById(User.builder().id(userId).avatar(relativeUrl).build());
+        // 写库成功后删旧文件（只删本地 /upload/avatar/ 下的，外部 URL 不碰）
+        deleteOldAvatarFile(oldAvatar);
+        return relativeUrl;
+    }
+    // 取「可用」用户：不存在或已注销都抛 401，供资料/昵称/头像等按 id 操作的入口复用
+    private User findActiveUser(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || isDeleted(user)) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "用户不存在");
+        }
+        return user;
+    }
+
+    // 是否已注销（is_deleted = 1）
+    private boolean isDeleted(User user) {
+        return Integer.valueOf(1).equals(user.getIsDeleted());
+    }
+
+    // 归一化 Content-Type：统一小写、去掉「;」后面的参数（如 charset），便于按白名单比对；空值原样返回
+    private String normalizeContentType(String contentType) {
+        if (contentType == null) {
+            return null;
+        }
+        String normalized = contentType.trim().toLowerCase(Locale.ROOT);
+        int semicolon = normalized.indexOf(';');
+        return semicolon > 0 ? normalized.substring(0, semicolon).trim() : normalized;
+    }
+
+    // 删除旧头像文件：只处理 /upload/avatar/ 开头的本地相对路径，其余忽略
+    private void deleteOldAvatarFile(String oldAvatar) {
+        if (oldAvatar == null || !oldAvatar.startsWith("/upload/avatar/")) {
+            return;
+        }
+        String oldName = oldAvatar.substring("/upload/avatar/".length());
+        if (oldName.isBlank()) {
+            return;
+        }
+        File oldFile = new File(UPLOAD_DIR, oldName);
+        if (oldFile.exists()) {
+            oldFile.delete();
+        }
+    }
+
+    @Override
+    public UserStatisticsVO getUserStatistics(String period) {
+        LocalDate today = LocalDate.now();
+        // 时间窗口与 order-service 的营业额报表保持一致：昨日 / 近7天 / 本月 / 近12月
+        String p = (period == null || period.isBlank()) ? "year" : period;
+        String bucketType;
+        String format;
+        LocalDate begin;
+        LocalDate end;
+        switch (p) {
+            case "yesterday" -> {
+                bucketType = "hour";
+                format = "%H";
+                begin = today.minusDays(1);
+                end = begin;
+            }
+            case "week" -> {
+                bucketType = "day";
+                format = "%Y-%m-%d";
+                begin = today.minusDays(6);
+                end = today;
+            }
+            case "month" -> {
+                bucketType = "day";
+                format = "%Y-%m-%d";
+                begin = today.withDayOfMonth(1);
+                end = today;
+            }
+            case "year" -> {
+                bucketType = "month";
+                format = "%Y-%m";
+                begin = today.minusMonths(11).withDayOfMonth(1);
+                end = today;
+            }
+            default -> throw new BusinessException(HttpStatus.BAD_REQUEST, "非法的统计维度");
+        }
+
+        // 查询区间 [begin 0点, end 次日 0点)，JVM 本地时区与 create_time 同基准
+        List<Map<String, Object>> rows = userMapper.countNewUsersByBucket(
+                begin.atStartOfDay(), end.plusDays(1).atStartOfDay(), format);
+        // 行转 map（bucket -> cnt），缺失桶补 0
+        Map<String, Long> cntMap = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            cntMap.put(String.valueOf(row.get("bucket")), ((Number) row.get("cnt")).longValue());
+        }
+
+        List<String> buckets = new ArrayList<>();
+        List<Long> newUsers = new ArrayList<>();
+        if ("hour".equals(bucketType)) {
+            for (int h = 0; h < 24; h++) {
+                String key = String.format("%02d", h);
+                buckets.add(key + ":00");
+                newUsers.add(cntMap.getOrDefault(key, 0L));
+            }
+        } else if ("day".equals(bucketType)) {
+            for (LocalDate d = begin; !d.isAfter(end); d = d.plusDays(1)) {
+                String key = d.toString();
+                buckets.add(key);
+                newUsers.add(cntMap.getOrDefault(key, 0L));
+            }
+        } else {
+            for (int i = 0; i < 12; i++) {
+                String key = begin.plusMonths(i).toString().substring(0, 7);
+                buckets.add(key);
+                newUsers.add(cntMap.getOrDefault(key, 0L));
+            }
+        }
+
+        // 累计用户曲线（存量）在这里一次算完，前端只负责画：
+        // 期初存量 = 用户总量 − 本窗口新增（窗口内没有可还原的注销时点，只能这样倒推）
+        long totalUsers = userMapper.countTotalUsers();
+        long windowNew = newUsers.stream().mapToLong(Long::longValue).sum();
+        long acc = Math.max(0L, totalUsers - windowNew);
+        List<Long> cumulativeUsers = new ArrayList<>(newUsers.size());
+        for (Long n : newUsers) {
+            long v = (n == null ? 0L : n);
+            acc += v;
+            cumulativeUsers.add(acc);
+        }
+
+        return UserStatisticsVO.builder()
+                .bucketType(bucketType)
+                .buckets(buckets)
+                .newUsers(newUsers)
+                .cumulativeUsers(cumulativeUsers)
+                .totalUsers(totalUsers)
+                .build();
+    }
+}

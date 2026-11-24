@@ -1,0 +1,10 @@
+@layer components {
+  .card {
+    @apply bg-container rounded-lg p-lg inline-block;
+  }
+
+  // 侧边栏菜单选中项：antd 默认右侧还有 3px 主色竖条，夜间模式下和整行高亮背景形成两种蓝色割裂，去掉竖条
+  .ant-menu-inline .ant-menu-item-selected::after {
+    border-right: 0;
+  }
+}

@@ -1,0 +1,17 @@
+.idea/
+.vscode/
+.trae/
+.trae-html-share-packages/
+.claude/
+.workbuddy/
+.local/
+.screenshots/
+/docs/
+
+# 子项目原有 Git 历史仅保留在本地，不上传
+**/.git.backup/
+
+.DS_Store
+Thumbs.db
+*.log
+/*.dll

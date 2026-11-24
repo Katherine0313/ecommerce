@@ -1,0 +1,297 @@
+{
+	"easycom": {
+			"autoscan": true,
+			"custom": {
+				// uni-ui 规则如下配置
+				"^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue",
+				"^u-(.*)": "uview-plus/components/u-$1/u-$1.vue"
+			}
+		},
+	"pages":[
+		// ===== 主包：tabBar 页 + 我的子页（index 必须放第一个作为启动页）=====
+		{
+			"path":"pages/index/index",
+			"style": {
+				// 关掉原生导航栏，改用全局组件 CustomNavbar
+				// 下拉刷新改用 scroll-view 的 refresher-enabled 自绘：
+				// 原生下拉的转圈固定在页面顶部，会被 fixed 导航栏盖住
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/category/category",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/cart/cart",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/my",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/personal-info/personal-info",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/address/address",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/address/address-edit",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/favorites/favorites",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/member/member",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/about-us/about-us",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/feedback/feedback",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/logistics/logistics",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path":"pages/my/customer-service/customer-service",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			// 文章详情：Banner 跳文章（带 id）、用户协议/隐私政策（带 title）
+			"path":"pages/article/detail",
+			"style": {
+				"navigationStyle": "custom"
+			}
+		}
+	],
+	// ===== 分包：搜索 / 订单（含商品详情） / 售后 =====
+	// root 是物理目录，path 是相对 root 的路径
+	// 商品详情已从 pages/goods/detail.vue 挪到 pages/order/detail.vue，
+	// 路由随之改为 /pages/order/detail（见下方 order 分包第一项）
+	"subPackages": [
+		{
+			"root": "pages/search",
+			"pages": [
+				{
+					"path": "search",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/order",
+			"pages": [
+				{
+					// 商品详情页：用原生导航栏（页面内没有 CustomNavbar）
+					"path": "detail",
+					"style": {
+						"navigationBarTitleText": "商品详情",
+						"navigationBarTextStyle": "black",
+						"navigationBarBackgroundColor": "#ffffff"
+					}
+				},
+				{
+					"path": "list",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "confirm",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "pay-success",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "pending-pay",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "pending-ship",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "pending-receive",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "logistics",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "review",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/after-sales",
+			"pages": [
+				{
+					"path": "apply",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "only-refund",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "return-refund",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "exchange",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "only-refund-detail",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "return-refund-detail",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "exchange-detail",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "return-tracking",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		},
+		{
+			"root": "pages/coupon",
+			"pages": [
+				{
+					"path": "coupon-center",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "coupons",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "seckill/seckill-detail",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				},
+				{
+					"path": "seckill/seckill-order-list",
+					"style": {
+						"navigationStyle": "custom"
+					}
+				}
+			]
+		}
+	],
+	"tabBar": {
+		// 关掉原生 tabBar，改由全局组件 CustomTabBar 渲染（字体图标，矢量不糊）
+		// list 仅用于让 uni.switchTab 识别哪些是 tab 页，图标/配色都在组件里控制，这里不再配置
+		"custom": true,
+		"color": "#333333",
+		"selectedColor": "#FF6700",
+		"backgroundColor": "#ffffff",
+		"borderStyle": "white",
+		"list":[
+			{
+				"pagePath": "pages/index/index",
+				"text": "首页"
+			},
+			{
+				"pagePath": "pages/category/category",
+				"text": "分类"
+			},
+			{
+				"pagePath": "pages/cart/cart",
+				"text": "购物车"
+			},
+			{
+				"pagePath": "pages/my/my",
+				"text": "我的"
+			}
+		]
+	},
+	"globalStyle": {
+		// 导航栏整体是品牌橙，状态栏文字用白色才有对比
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "杰米多多",
+		"navigationBarBackgroundColor": "#F8F8F8",
+		"backgroundColor": "#F8F8F8"
+	},
+	"uniIdRouter": {}
+}

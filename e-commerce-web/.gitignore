@@ -1,0 +1,56 @@
+# === 依赖 ===
+node_modules
+
+# === 环境变量 ===
+
+.env
+.env.*
+!.env.example
+*.local
+
+# === 构建产物 ===
+dist
+dist-ssr
+target
+build/
+
+
+# === 日志 ===
+*.log
+npm-debug.log*
+
+# === 编辑器 / IDE ===
+.vscode
+.idea
+.history
+*.swp
+*.swo
+
+# === 操作系统 ===
+.DS_Store
+Thumbs.db
+
+# === 测试 ===
+coverage/
+
+# === 缓存 ===
+.cache
+docs/.vitepress/cache
+
+# === 数据库 ===
+*session.sql
+
+# 单实例 PID 锁（服务启动时生成、退出时删除，不该进版本库）
+server/sqlite/database.lock
+
+# === 自动生成 ===
+components.d.ts
+*.tsbuildinfo
+
+# 编辑器 / IDE / AI 工具（不要提交）
+.idea/
+.trae/
+.trae-html-share-packages/
+.workbuddy/
+.claude/
+.vscode/

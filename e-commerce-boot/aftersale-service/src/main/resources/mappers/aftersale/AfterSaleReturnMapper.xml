@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.aftersale.mapper.AfterSaleReturnMapper">
+
+    <!-- 插入占位行：创建售后时写，时间戳/退货字段先为 NULL -->
+    <insert id="insertPlaceholder" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO after_sale_returns (after_sale_id, return_way, return_time_slot, is_deleted, created_at, updated_at)
+        VALUES (#{afterSaleId}, #{returnWay}, #{returnTimeSlot}, 0, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findByAfterSaleId" resultType="ecommerce.aftersale.entity.AfterSaleReturn">
+        SELECT id, after_sale_id, return_way, return_time_slot, return_courier, return_tracking_number,
+               pickup_at, pickup_no, return_at, review_at, rejected_at,
+               refund_at, refunded_at, is_deleted, created_at, updated_at
+        FROM after_sale_returns
+        WHERE after_sale_id = #{afterSaleId} AND is_deleted = 0
+    </select>
+
+    <!-- 用户提交退货方式 -->
+    <update id="updateReturnInfo">
+        UPDATE after_sale_returns
+        SET return_way = #{returnWay}, return_time_slot = #{returnTimeSlot}, return_at = #{returnAt}, updated_at = #{updatedAt}
+        WHERE after_sale_id = #{afterSaleId} AND is_deleted = 0
+    </update>
+
+    <!-- 回填退货物流：写 return_courier/return_tracking_number/return_at -->
+    <update id="updateTracking">
+        UPDATE after_sale_returns
+        SET return_courier = #{courier}, return_tracking_number = #{trackingNumber}, return_at = #{returnAt}, updated_at = #{updatedAt}
+        WHERE after_sale_id = #{afterSaleId} AND is_deleted = 0
+    </update>
+
+    <!-- 买家确认上门取件 -->
+    <update id="updatePickup">
+        UPDATE after_sale_returns
+        SET pickup_at = #{pickupAt}, pickup_no = #{pickupNo}, return_at = #{pickupAt}, updated_at = #{updatedAt}
+        WHERE after_sale_id = #{afterSaleId} AND is_deleted = 0
+    </update>
+
+    <!-- 后台审核：更新指定时间戳列（列名白名单由 service 层控制） -->
+    <update id="updateTimestamp">
+        UPDATE after_sale_returns
+        SET ${column} = #{now}, updated_at = #{now}
+        WHERE after_sale_id = #{afterSaleId} AND is_deleted = 0
+    </update>
+
+    <!-- 软删除子表 -->
+    <update id="softDelete">
+        UPDATE after_sale_returns
+        SET is_deleted = 1, updated_at = #{now}
+        WHERE after_sale_id = #{afterSaleId}
+    </update>
+
+</mapper>

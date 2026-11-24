@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ecommerce.order.mapper.OrderItemMapper">
+
+    <!-- 批量插入订单明细 -->
+    <insert id="insertBatch">
+        INSERT INTO order_items (order_id, product_id, sku_id, sku_code, spec_json, product_name, image,
+                                 sales_price, original_price, quantity, sub_total, discount_amount,
+                                 insurance_detail, insurance_fee, is_deleted, created_at)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.orderId}, #{item.productId}, #{item.skuId}, #{item.skuCode}, #{item.specJson},
+             #{item.productName}, #{item.image},
+             #{item.salesPrice}, #{item.originalPrice}, #{item.quantity}, #{item.subTotal},
+             #{item.discountAmount}, #{item.insuranceDetail}, #{item.insuranceFee}, 0, NOW())
+        </foreach>
+    </insert>
+
+    <!-- 查某订单明细 -->
+    <select id="listByOrderId" resultType="ecommerce.order.entity.OrderItem">
+        SELECT id, order_id, product_id, sku_id, sku_code, spec_json, product_name, image,
+               sales_price, original_price, quantity, sub_total, discount_amount,
+               insurance_detail, insurance_fee, after_sale_status, after_sale_id, is_deleted, created_at
+        FROM order_items
+        WHERE order_id = #{orderId} AND is_deleted = 0
+    </select>
+
+    <!-- 批量查多个订单明细：一次 IN 查回，Java 侧按 order_id 分组；调用方需保证 orderIds 非空 -->
+    <select id="listByOrderIds" resultType="ecommerce.order.entity.OrderItem">
+        SELECT id, order_id, product_id, sku_id, sku_code, spec_json, product_name, image,
+               sales_price, original_price, quantity, sub_total, discount_amount,
+               insurance_detail, insurance_fee, after_sale_status, after_sale_id, is_deleted, created_at
+        FROM order_items
+        WHERE is_deleted = 0
+          AND order_id IN
+        <foreach collection="orderIds" item="orderId" open="(" separator="," close=")">
+            #{orderId}
+        </foreach>
+        ORDER BY order_id ASC, id ASC
+    </select>
+
+    <!-- 销量排名：某区间已支付订单按商品汇总销量
+         口径：pay_at 落在区间，排除待付款(1)/已取消(6)；退款暂不扣减
+         商品名/图取快照，同一商品改名后可能出现多条快照，用 MAX 取其中一条 -->
+    <select id="sumSalesRanking" resultType="ecommerce.order.vo.SalesRankingItemVO">
+        SELECT oi.product_id,
+               MAX(oi.product_name) AS product_name,
+               MAX(oi.image) AS image,
+               SUM(oi.quantity) AS sales_quantity
+        FROM order_items oi
+                 JOIN orders o ON o.id = oi.order_id
+        WHERE oi.is_deleted = 0
+          AND o.is_deleted = 0
+          AND o.order_status NOT IN (1, 6)
+          AND o.pay_at IS NOT NULL
+          AND o.pay_at &gt;= #{start} AND o.pay_at &lt; #{end}
+        GROUP BY oi.product_id
+        ORDER BY sales_quantity DESC, oi.product_id
+        LIMIT #{limit}
+    </select>
+
+</mapper>
