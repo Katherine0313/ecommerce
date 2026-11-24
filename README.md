@@ -4,7 +4,7 @@
 
 ## 项目组成
 
-| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 目录 | 说明 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 目录 | 说明 |
 |---|---|---|
 | Java 后端 | `e-commerce-boot` | Spring Cloud 微服务，提供商城、后台及 AI 内部业务接口 |
 | Python AI 服务 | `ecommerce-python` | FastAPI + LangChain + LangGraph，提供智能客服与运营助手 |
@@ -14,7 +14,7 @@
 
 ## 技术栈
 
-| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 技术 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 技术 |
 |---|---|
 | Java 后端 | Java 17、Spring、Spring Boot、Spring MVC、Spring Cloud、Spring Cloud Gateway、OpenFeign、MyBatis / MyBatis-Plus、MySQL、Redis、Nacos、JWT、WebSocket、Docker、Nginx |
 | Python 后端 | FastAPI、LangChain、LangGraph |
@@ -24,7 +24,7 @@
 
 ## 后端核心功能
 
-| 功能域&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 已实现能力 |
+| 功能域&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 已实现能力 |
 |---|---|
 | 商品与内容 | 商品、分类、规格模板、标签、评价、Banner、文章、图片及视频上传 |
 | 用户与会员 | 微信 openid 静默登录、PC 账号密码 / 模拟手机验证码登录、用户资料、收货地址、会员等级、成长值、收藏与意见反馈 |
@@ -43,7 +43,7 @@
 
 ## Java 微服务拆分
 
-| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 职责 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 职责 |
 |---|---|
 | `gateway` | 统一入口、路由、跨域及静态资源代理 |
 | `auth-service` | 后台登录、图形验证码、失败锁定及 RBAC 权限签发 |
@@ -93,7 +93,7 @@ ecommerce-workspace/
 
 ## **演示地址**
 
-| 端&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 地址 |
+| 端&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 地址 |
 |---|---|
 | 微信小程序 | 杰米多多（扫描上方小程序码） |
 | 后台管理 | https://www.jiemids.com |
