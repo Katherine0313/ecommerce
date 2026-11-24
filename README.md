@@ -4,7 +4,7 @@
 
 ## 项目组成
 
-| 模块 | 目录 | 说明 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 目录 | 说明 |
 |---|---|---|
 | Java 后端 | `e-commerce-boot` | Spring Cloud 微服务，提供商城、后台及 AI 内部业务接口 |
 | Python AI 服务 | `ecommerce-python` | FastAPI + LangChain + LangGraph，提供智能客服与运营助手 |
@@ -14,18 +14,17 @@
 
 ## 技术栈
 
-| 模块 | 技术 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 技术 |
 |---|---|
-| Java 后端 | Java 17、Spring、Spring Boot、Spring MVC、Spring Cloud、Spring Cloud Gateway、OpenFeign、MyBatis / MyBatis-Plus |
-| Python 后端 | FastAPI、LangChain、LangGraph、OpenAI 兼容协议、SSE |
-| 后台管理 | Vue 3、Vite、Ant Design Vue、Pinia、Vue Router、Axios、ECharts |
-| PC 商城 | Vue 3、Vite、Element Plus、Pinia、Vue Router、Axios |
-| 微信小程序 | uni-app、Vue 3、uView Plus、uni-ui、Pinia |
-| 基础设施 | MySQL、Redis、Nacos、JWT、WebSocket、Docker、Nginx |
+| Java 后端 | Java 17、Spring、Spring Boot、Spring MVC、Spring Cloud、Spring Cloud Gateway、OpenFeign、MyBatis / MyBatis-Plus、MySQL、Redis、Nacos、JWT、WebSocket、Docker、Nginx |
+| Python 后端 | FastAPI、LangChain、LangGraph |
+| 后台管理 | Vue 3、Ant Design Vue |
+| PC 商城 | Vue 3、Element Plus |
+| 微信小程序 | uni-app、Vue 3 |
 
 ## 后端核心功能
 
-| 功能域 | 已实现能力 |
+| 功能域&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 已实现能力 |
 |---|---|
 | 商品与内容 | 商品、分类、规格模板、标签、评价、Banner、文章、图片及视频上传 |
 | 用户与会员 | 微信 openid 静默登录、PC 账号密码 / 模拟手机验证码登录、用户资料、收货地址、会员等级、成长值、收藏与意见反馈 |
@@ -44,7 +43,7 @@
 
 ## Java 微服务拆分
 
-| 模块 | 职责 |
+| 模块&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 职责 |
 |---|---|
 | `gateway` | 统一入口、路由、跨域及静态资源代理 |
 | `auth-service` | 后台登录、图形验证码、失败锁定及 RBAC 权限签发 |
@@ -75,19 +74,26 @@ ecommerce-workspace/
 |:---:|:---:|
 | <img src="images/admin-dashboard.png" alt="后台管理工作台" width="480"> | <img src="images/admin-product-list.png" alt="后台商品管理" width="480"> |
 
+### PC 商城
+
+| 首页 | 商品详情 |
+|:---:|:---:|
+| <img src="images/mall-home.jpg" alt="PC 商城首页" width="480"> | <img src="images/mall-product-detail.jpg" alt="PC 商城商品详情" width="480"> |
+
 ### 微信小程序
 
 | 首页 | 商品详情 | 提交订单 |
 |:---:|:---:|:---:|
 | <img src="images/miniapp-home.jpg" alt="小程序首页" width="240"> | <img src="images/miniapp-product-detail.jpg" alt="小程序商品详情" width="240"> | <img src="images/miniapp-checkout.jpg" alt="小程序提交订单" width="240"> |
 
-## 演示地址
-
 <p align="center">
   <img src="e-commerce-boot/docs/images/miniapp-qrcode.png" width="240" alt="杰米多多小程序码">
+  <br>微信扫码进入小程序
 </p>
 
-| 端 | 地址 |
+## **演示地址**
+
+| 端&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | 地址 |
 |---|---|
 | 微信小程序 | 杰米多多（扫描上方小程序码） |
 | 后台管理 | https://www.jiemids.com |
