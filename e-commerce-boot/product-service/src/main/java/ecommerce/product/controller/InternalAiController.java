@@ -81,7 +81,6 @@ public class InternalAiController {
                 .map(s -> SkuLiteVO.builder()
                         .id(s.getId())
                         .specJson(s.getSpecJson())
-                        .specKey(s.getSpecKey())
                         .price(s.getPrice())
                         .marketPrice(s.getMarketPrice())
                         .stock(s.getStock())
@@ -241,9 +240,8 @@ public class InternalAiController {
     @Builder
     public static class SkuLiteVO {
         private Long id;
-        /** 规格组合，如 {"颜色":"曜石黑","内存":"256G"} */
+        /** 规格组合，如 {"颜色":"曜石黑","内存":"256G"}；由 product_sku_spec_rel 中间表聚合 */
         private Map<String, String> specJson;
-        private String specKey;
         private BigDecimal price;
         private BigDecimal marketPrice;
         private Integer stock;

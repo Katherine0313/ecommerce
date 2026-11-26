@@ -35,15 +35,22 @@ import java.nio.charset.StandardCharsets;
  *   <li>key = 结果 JSON —— 首次已成功，直接回放（仅 cacheResult=true）。</li>
  * </ul>
  * <p>
- * 切面排在事务外层（{@link Ordered#HIGHEST_PRECEDENCE}）：只有事务提交成功后才会缓存结果，
+ * 切面排在事务外层：只有事务提交成功后才会缓存结果，
  * 提交阶段失败也会走到 catch 里释放 key，不会把用户卡在「处理中」。
+ * <p>
+ * order 不能用 {@link Ordered#HIGHEST_PRECEDENCE}：Spring 的 ExposeInvocationInterceptor（order =
+ * HIGHEST_PRECEDENCE + 1）必须排在切面之前，否则切面做 pointcut 匹配时拿不到当前 MethodInvocation，
+ * JoinPointMatch 绑不上，注解参数 Idempotent 无法注入，会抛
+ * "Required to bind 2 arguments, but only bound 1"。因此这里取 HIGHEST_PRECEDENCE + 10，
+ * 既在 ExposeInvocationInterceptor 之后，又仍在事务之外。
  * <p>
  * Redis 异常一律降级（failOpen=true 时放行），保证缓存不可用不影响主流程。
  */
 @Slf4j
 @Aspect
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+// 必须排在 ExposeInvocationInterceptor（HIGHEST_PRECEDENCE + 1）之后，否则 JoinPointMatch 绑不上
+@Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class IdempotentAspect {
 
     /** 占位值：结果尚未产生。与改造前 OrderServiceImpl 里的值保持一致，方便灰度期间新旧实例共存 */

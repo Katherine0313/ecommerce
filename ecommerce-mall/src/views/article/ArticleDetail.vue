@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getArticleDetail, reportArticleBrowse } from '@/api/article'
@@ -7,6 +7,11 @@ import { getArticleDetail, reportArticleBrowse } from '@/api/article'
 const route = useRoute()
 const loading = ref(true)
 const article = ref(null)
+
+// 正文是后台富文本，图片往往在首屏之外；统一补 loading="lazy" 交给浏览器原生懒加载
+const contentHtml = computed(() =>
+  (article.value?.content || '').replace(/<img\b(?![^>]*\bloading=)/gi, '<img loading="lazy" ')
+)
 
 onMounted(() => {
   const id = route.params.id
@@ -40,7 +45,7 @@ onMounted(() => {
       </div>
       <img v-if="article.cover" :src="article.cover" class="article-cover" alt="" />
       <!-- 正文是后台富文本（管理员录入），小程序端用 rich-text 渲染，这里同样直接输出 -->
-      <div class="article-content" v-html="article.content"></div>
+      <div class="article-content" v-html="contentHtml"></div>
     </article>
   </div>
 </template>

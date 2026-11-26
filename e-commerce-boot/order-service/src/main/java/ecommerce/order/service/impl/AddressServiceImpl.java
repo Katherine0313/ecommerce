@@ -6,6 +6,7 @@ import ecommerce.order.dto.UpdateAddressDTO;
 import ecommerce.order.entity.Address;
 import ecommerce.order.mapper.AddressMapper;
 import ecommerce.order.service.AddressService;
+import ecommerce.order.support.PhoneValidator;
 import ecommerce.order.vo.AddressVO;
 import ecommerce.utils.UserContext;
 import lombok.extern.slf4j.Slf4j;
@@ -131,12 +132,12 @@ public class AddressServiceImpl implements AddressService {
         return UserContext.getUserId();
     }
 
-    /** 四个必填字段非空校验 + 手机号 11 位数字格式 */
+    /** 四个必填字段非空校验 + 手机号格式校验（11 位明文或脱敏格式，见 {@link PhoneValidator}） */
     private void validate(String consignee, String phone, String region, String detailAddress) {
         if (consignee == null || consignee.isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "收货人不能为空");
         }
-        if (phone == null || !phone.trim().matches("\\d{11}")) {
+        if (!PhoneValidator.isValid(phone)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "手机号格式不正确");
         }
         if (region == null || region.isBlank()) {

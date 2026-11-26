@@ -157,6 +157,7 @@ watch(
             hide-on-click-modal
             fit="cover"
             class="review-media-item"
+            lazy
           />
         </div>
         <!-- 评价视频：一条评价最多一个视频，单独一行播放器 -->

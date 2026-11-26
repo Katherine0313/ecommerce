@@ -94,7 +94,6 @@
 			}
 		},
 		computed: {
-			rowKey(item) { return item.skuId || item.productId },
 			// 选中的条目
 			selectedItems() {
 				return this.items.filter(i => this.selectedIds.includes(this.rowKey(i)))
@@ -117,6 +116,8 @@
 			this.loadCart()
 		},
 		methods: {
+			// 购物车条目的唯一键：优先 skuId，没有则回退 productId
+			rowKey(item) { return item.skuId || item.productId },
 			// 拉购物车列表；先 ensureLogin 兜底（/api/cart 不在免登录白名单内），再清掉已不存在的选中项
 			loadCart() {
 				this.loading = true

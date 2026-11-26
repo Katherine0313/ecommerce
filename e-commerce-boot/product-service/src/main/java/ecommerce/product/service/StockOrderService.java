@@ -4,9 +4,11 @@ import ecommerce.exception.BusinessException;
 import ecommerce.product.dto.StockOrderCreateDTO;
 import ecommerce.product.dto.StockWriteDTO;
 import ecommerce.product.entity.ProductSku;
+import ecommerce.product.entity.SkuSpecRel;
 import ecommerce.product.entity.StockOrder;
 import ecommerce.product.entity.StockOrderItem;
 import ecommerce.product.mapper.ProductSkuMapper;
+import ecommerce.product.mapper.SkuSpecRelMapper;
 import ecommerce.product.mapper.StockOrderItemMapper;
 import ecommerce.product.mapper.StockOrderMapper;
 import ecommerce.product.support.OrderNoGenerator;
@@ -40,15 +42,33 @@ public class StockOrderService {
     private final StockWriteService writeService;
     private final OrderNoGenerator noGenerator;
     private final ProductSkuMapper skuMapper;
+    private final SkuSpecRelMapper skuSpecRelMapper;
 
     public StockOrderService(StockOrderMapper orderMapper, StockOrderItemMapper itemMapper,
                              StockWriteService writeService, OrderNoGenerator noGenerator,
-                             ProductSkuMapper skuMapper) {
+                             ProductSkuMapper skuMapper, SkuSpecRelMapper skuSpecRelMapper) {
         this.orderMapper = orderMapper;
         this.itemMapper = itemMapper;
         this.writeService = writeService;
         this.noGenerator = noGenerator;
         this.skuMapper = skuMapper;
+        this.skuSpecRelMapper = skuSpecRelMapper;
+    }
+
+    /**
+     * 从中间表 product_sku_spec_rel 拼装 SKU 的规格展示文字（如 颜色:曜石黑|存储容量:256G）。
+     * <p>
+     * specKey 字段已下线，规格文字统一由 rel 聚合。
+     */
+    private String buildSpecText(Long skuId) {
+        if (skuId == null) return null;
+        List<SkuSpecRel> rels = skuSpecRelMapper.listBySkuIds(List.of(skuId));
+        if (rels == null || rels.isEmpty()) return null;
+        return rels.stream()
+                .filter(r -> r.getGroupName() != null && r.getSpecValue() != null)
+                .sorted(java.util.Comparator.comparing(r -> r.getSort() == null ? 999 : r.getSort()))
+                .map(r -> r.getGroupName() + ":" + r.getSpecValue())
+                .collect(java.util.stream.Collectors.joining("|"));
     }
 
     /** 手动建单据（Receipt / Adjustment / 手动 Shipment）：写单据 + 明细 + 库存流水 */
@@ -139,13 +159,10 @@ public class StockOrderService {
                 // 入/出库数量必须为正；调整单 qty 是有符号差异，允许为负、不允许为 0
                 throw new BusinessException("SKU " + itemDto.getSkuCode() + " 明细不完整");
             }
-            // 调用方没带规格文字时，用 SKU 的 spec_key 补全（订单发货链路只传 skuId）
+            // 调用方没带规格文字时，用 SKU 的规格关联补全（订单发货链路只传 skuId）
             String specText = itemDto.getSpecText();
             if (specText == null || specText.isBlank()) {
-                ProductSku sku = skuMapper.findById(itemDto.getSkuId());
-                if (sku != null) {
-                    specText = sku.getSpecKey();
-                }
+                specText = buildSpecText(itemDto.getSkuId());
             }
             StockOrderItem item = StockOrderItem.builder()
                 .orderId(order.getId())

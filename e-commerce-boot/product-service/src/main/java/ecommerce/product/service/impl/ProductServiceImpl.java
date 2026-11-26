@@ -8,10 +8,12 @@ import ecommerce.exception.BusinessException;
 import ecommerce.product.entity.Category;
 import ecommerce.product.entity.Product;
 import ecommerce.product.entity.ProductSku;
+import ecommerce.product.entity.SkuSpecRel;
 import ecommerce.product.entity.Tag;
 import ecommerce.product.mapper.CategoryMapper;
 import ecommerce.product.mapper.ProductMapper;
 import ecommerce.product.mapper.ProductSkuMapper;
+import ecommerce.product.mapper.SkuSpecRelMapper;
 import ecommerce.product.mapper.TagMapper;
 import ecommerce.product.service.ProductService;
 import ecommerce.product.service.PromotionService;
@@ -33,6 +35,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,6 +54,7 @@ public class ProductServiceImpl implements ProductService {
 
     private final ProductMapper productMapper;
     private final ProductSkuMapper skuMapper;
+    private final SkuSpecRelMapper skuSpecRelMapper;
     private final CategoryMapper categoryMapper;
     private final TagMapper tagMapper;
     private final StringRedisTemplate stringRedisTemplate;
@@ -58,11 +62,13 @@ public class ProductServiceImpl implements ProductService {
     private final ProductSpecsCodec specsCodec;
     private final PromotionService promotionService;
 
-    public ProductServiceImpl(ProductMapper productMapper, ProductSkuMapper skuMapper, CategoryMapper categoryMapper,
+    public ProductServiceImpl(ProductMapper productMapper, ProductSkuMapper skuMapper,
+                              SkuSpecRelMapper skuSpecRelMapper, CategoryMapper categoryMapper,
                               TagMapper tagMapper, StringRedisTemplate stringRedisTemplate, ObjectMapper objectMapper,
                               ProductSpecsCodec specsCodec, PromotionService promotionService) {
         this.productMapper = productMapper;
         this.skuMapper = skuMapper;
+        this.skuSpecRelMapper = skuSpecRelMapper;
         this.categoryMapper = categoryMapper;
         this.tagMapper = tagMapper;
         this.stringRedisTemplate = stringRedisTemplate;
@@ -307,7 +313,12 @@ public class ProductServiceImpl implements ProductService {
         ProductVO vo = toVO(product);
         if (product.getSkuType() != null && product.getSkuType() == 1) {
             List<ProductSku> skus = skuMapper.listEnabledByProductId(id);
-            vo.setSkus(skus.stream().map(this::toSkuVO).toList());
+            // 一次查出所有 rel，按 sku_id 分组 → 聚合成 Map<groupId, groupName, value>
+            List<SkuSpecRel> allRels = skuSpecRelMapper.listByProductId(id);
+            Map<Long, List<SkuSpecRel>> relsBySku = allRels.stream()
+                    .collect(Collectors.groupingBy(SkuSpecRel::getSkuId));
+            vo.setSkus(skus.stream().map(s -> toSkuVO(s, relsBySku.getOrDefault(s.getId(), List.of())))
+                    .toList());
             BigDecimal min = null;
             BigDecimal max = null;
             for (ProductSku s : skus) {
@@ -325,7 +336,6 @@ public class ProductServiceImpl implements ProductService {
             vo.setPriceMax(product.getSalesPrice());
         }
         promotionService.applyDisplay(List.of(vo));
-        // 增值保障按最终展示价（含活动价）计价，规则由后端统一判断，前端只渲染返回的选项
         vo.setInsuranceOptions(InsurancePolicy.options(vo.getCategoryId(), vo.getPrice()));
         return vo;
     }
@@ -543,11 +553,10 @@ public class ProductServiceImpl implements ProductService {
                 .build();
     }
 
-    private SkuVO toSkuVO(ProductSku s) {
+    private SkuVO toSkuVO(ProductSku s, List<SkuSpecRel> rels) {
         SkuVO vo = new SkuVO();
         vo.setId(s.getId());
-        vo.setSpecKey(s.getSpecKey());
-        vo.setSpecJson(parseSpecJson(s.getSpecJson()));
+        vo.setSpecJson(buildSpecJsonFromRel(rels));
         vo.setPrice(s.getPrice());
         vo.setMarketPrice(s.getMarketPrice());
         vo.setStock(s.getStock());
@@ -555,6 +564,18 @@ public class ProductServiceImpl implements ProductService {
         vo.setSkuCode(s.getSkuCode());
         vo.setStatus(s.getStatus());
         return vo;
+    }
+
+    /** 从 rel 聚合成 Map<groupName, value>；rels 为空返回空 Map（单规格 SKU） */
+    private Map<String, String> buildSpecJsonFromRel(List<SkuSpecRel> rels) {
+        if (rels == null || rels.isEmpty()) return Map.of();
+        Map<String, String> out = new LinkedHashMap<>();
+        for (SkuSpecRel r : rels) {
+            if (r.getGroupName() != null && r.getSpecValue() != null) {
+                out.put(r.getGroupName(), r.getSpecValue());
+            }
+        }
+        return out;
     }
 
     private List<SkuSpecVO> decodeSkuSpecs(String json) {

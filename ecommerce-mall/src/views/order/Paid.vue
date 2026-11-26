@@ -26,7 +26,7 @@
           <!-- 商品列表 -->
           <div class="goods-list">
             <div v-for="item in orderData.items" :key="item.orderItemId" class="goods-item">
-              <img :src="item.image" class="goods-img" alt="商品" />
+              <img :src="item.image" class="goods-img" alt="商品" loading="lazy" />
               <div class="goods-info">
                 <div class="goods-name">{{ item.productName }}</div>
                 <div class="goods-meta">

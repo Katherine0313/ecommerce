@@ -1627,9 +1627,7 @@ DROP TABLE IF EXISTS `product_sku`;
 CREATE TABLE `product_sku` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
   `product_id` bigint NOT NULL COMMENT '所属 SPU（products.id）',
-  `sku_code` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '商家编码',
-  `spec_json` json NOT NULL COMMENT '规格组合 {"颜色":"曜石黑","存储容量":"256G"}',
-  `spec_key` varchar(255) COLLATE utf8mb4_general_ci NOT NULL COMMENT '规格规范化串，用于唯一约束，如 颜色:曜石黑|存储容量:256G',
+  `sku_code` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '商家编码',
   `price` decimal(10,2) NOT NULL COMMENT '销售价',
   `market_price` decimal(10,2) DEFAULT NULL COMMENT '划线价',
   `cost_price` decimal(10,2) DEFAULT NULL COMMENT '成本价（后台字段）',
@@ -1641,11 +1639,12 @@ CREATE TABLE `product_sku` (
   `update_time` datetime NOT NULL,
   `min_stock` int NOT NULL DEFAULT '0' COMMENT '安全库存阈值（0=不预警）',
   `max_stock` int DEFAULT NULL COMMENT '上限阈值（可选）',
+  `is_default` tinyint NOT NULL DEFAULT '0' COMMENT '1=单规格商品的默认SKU；0=普通SKU',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_sku_spec` (`product_id`,`spec_key`),
   KEY `idx_sku_product` (`product_id`),
-  KEY `idx_sku_status_stock` (`status`,`stock`)
-) ENGINE=InnoDB AUTO_INCREMENT=1244 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品 SKU（多规格）';
+  KEY `idx_sku_status_stock` (`status`,`stock`),
+  CONSTRAINT `fk_sku_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=1244 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品 SKU（多规格；规格选择统一由 product_sku_spec_rel 承载）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1717,6 +1716,31 @@ LOCK TABLES `product_spec_value` WRITE;
 INSERT INTO `product_spec_value` VALUES (1,1,'曜石黑',1,'2026-11-06 13:50:59'),(2,1,'雪域白',2,'2026-11-06 13:50:59'),(3,1,'晴空蓝',3,'2026-11-06 13:50:59'),(4,2,'128G',1,'2026-11-06 13:50:59'),(5,2,'256G',2,'2026-11-06 13:50:59'),(6,2,'512G',3,'2026-11-06 13:50:59'),(7,3,'16G',1,'2026-11-06 13:50:59'),(8,3,'32G',2,'2026-11-06 13:50:59'),(9,4,'运动表带',1,'2026-11-06 13:50:59'),(10,4,'皮革表带',2,'2026-11-06 13:50:59'),(11,4,'金属表链',3,'2026-11-06 13:50:59'),(12,5,'单机身',1,'2026-11-06 13:50:59'),(13,5,'标准套机',2,'2026-11-06 13:50:59'),(14,6,'红轴',1,'2026-11-06 13:55:06'),(15,6,'青轴',2,'2026-11-06 13:55:06'),(16,6,'茶轴',3,'2026-11-06 13:55:06'),(17,7,'2K',1,'2026-11-06 13:55:06'),(18,7,'4K',2,'2026-11-06 13:55:06'),(19,8,'暖光',1,'2026-11-06 13:55:06'),(20,8,'正白',2,'2026-11-06 13:55:06'),(21,8,'彩光',3,'2026-11-06 13:55:06'),(22,9,'标准版',1,'2026-11-06 13:55:06'),(23,9,'水箱版',2,'2026-11-06 13:55:06'),(24,10,'10000mAh',1,'2026-11-06 13:55:06'),(25,10,'20000mAh',2,'2026-11-06 13:55:06'),(26,2,'1TB',4,'2026-11-06 13:55:06'),(27,2,'2TB',5,'2026-11-06 13:55:06');
 /*!40000 ALTER TABLE `product_spec_value` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `product_sku_spec_rel`
+-- SKU 与规格值的多对多关联表。一个 SKU 可同时选多个规格组的值（如 颜色=曜石黑、存储容量=256G），
+-- 每个规格组在一个 SKU 里只能选一个值（由 PRIMARY KEY (sku_id, spec_group_id) 保证）。
+-- 业务读写统一走此表；product_sku 不再持有冗余规格字段。
+--
+
+DROP TABLE IF EXISTS `product_sku_spec_rel`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `product_sku_spec_rel` (
+  `sku_id` bigint NOT NULL COMMENT 'product_sku.id',
+  `spec_group_id` bigint NOT NULL COMMENT 'product_spec_group.id',
+  `spec_value_id` bigint DEFAULT NULL COMMENT 'product_spec_value.id；字典被删时可为 NULL',
+  `spec_value` varchar(64) COLLATE utf8mb4_general_ci NOT NULL COMMENT '冗余规格值字符串，如 曜石黑 / 256G，语义独立',
+  `sort` int NOT NULL DEFAULT '0' COMMENT '展示顺序（同 sku 内按 group.sort）',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`sku_id`,`spec_group_id`),
+  KEY `idx_rel_value` (`spec_value_id`),
+  KEY `idx_rel_group` (`spec_group_id`),
+  KEY `idx_rel_sku_value` (`sku_id`,`spec_value_id`),
+  CONSTRAINT `fk_rel_sku` FOREIGN KEY (`sku_id`) REFERENCES `product_sku` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='SKU 与规格值多对多关联';
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `products`

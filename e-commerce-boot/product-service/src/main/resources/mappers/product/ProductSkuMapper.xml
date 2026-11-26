@@ -5,8 +5,8 @@
 <mapper namespace="ecommerce.product.mapper.ProductSkuMapper">
 
     <sql id="skuColumns">
-        id, product_id, sku_code, spec_json, spec_key, price, market_price, cost_price,
-        stock, image, status, sort, create_time, update_time
+        id, product_id, sku_code, price, market_price, cost_price,
+        stock, image, status, is_default, sort, create_time, update_time
     </sql>
 
     <select id="listByProductId" resultType="ecommerce.product.entity.ProductSku">
@@ -44,24 +44,23 @@
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO product_sku
-            (product_id, sku_code, spec_json, spec_key, price, market_price, cost_price,
-             stock, image, status, sort, create_time, update_time)
+            (product_id, sku_code, price, market_price, cost_price,
+             stock, image, status, is_default, sort, create_time, update_time)
         VALUES
-            (#{productId}, #{skuCode}, #{specJson}, #{specKey}, #{price}, #{marketPrice}, #{costPrice},
-             #{stock}, #{image}, #{status}, #{sort}, #{createTime}, #{updateTime})
+            (#{productId}, #{skuCode}, #{price}, #{marketPrice}, #{costPrice},
+             #{stock}, #{image}, #{status}, #{isDefault}, #{sort}, #{createTime}, #{updateTime})
     </insert>
 
     <update id="update">
         UPDATE product_sku
         SET sku_code     = #{skuCode},
-            spec_json    = #{specJson},
-            spec_key     = #{specKey},
             price        = #{price},
             market_price = #{marketPrice},
             cost_price   = #{costPrice},
             stock        = #{stock},
             image        = #{image},
             status       = #{status},
+            is_default   = #{isDefault},
             sort         = #{sort},
             update_time  = #{updateTime}
         WHERE id = #{id}
@@ -74,6 +73,10 @@
     <update id="updateStatusByProductId">
         UPDATE product_sku SET status = #{status}, update_time = NOW() WHERE product_id = #{productId}
     </update>
+
+    <delete id="deleteByProductId">
+        DELETE FROM product_sku WHERE product_id = #{productId}
+    </delete>
 
     <!-- 商品级汇总冗余：库存求和、售价取最低 SKU、划线价取最低价 SKU 的那条 -->
     <update id="refreshProductAggregate">

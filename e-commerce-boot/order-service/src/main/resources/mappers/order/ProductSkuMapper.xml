@@ -4,24 +4,35 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ecommerce.order.mapper.ProductSkuMapper">
 
+    <!-- 规格组合子查询：从 product_sku_spec_rel 聚合成 JSON 字符串 -->
+    <sql id="specJsonSub">
+        (SELECT CAST(JSON_OBJECTAGG(g.name, r.spec_value) AS CHAR)
+         FROM product_sku_spec_rel r
+         LEFT JOIN product_spec_group g ON g.id = r.spec_group_id
+         WHERE r.sku_id = s.id)
+    </sql>
+
     <select id="findById" resultType="ecommerce.order.entity.ProductSku">
-        SELECT id, product_id, sku_code, spec_json, spec_key, price, stock, status
-        FROM product_sku
-        WHERE id = #{id}
+        SELECT s.id, s.product_id, s.sku_code, s.price, s.stock, s.status,
+               <include refid="specJsonSub"/> AS spec_json
+        FROM product_sku s
+        WHERE s.id = #{id}
     </select>
 
     <select id="findDefaultByProductId" resultType="ecommerce.order.entity.ProductSku">
-        SELECT id, product_id, sku_code, spec_json, spec_key, price, stock, status
-        FROM product_sku
-        WHERE product_id = #{productId} AND status = 1
-        ORDER BY sort ASC, id ASC
+        SELECT s.id, s.product_id, s.sku_code, s.price, s.stock, s.status,
+               <include refid="specJsonSub"/> AS spec_json
+        FROM product_sku s
+        WHERE s.product_id = #{productId} AND s.status = 1
+        ORDER BY s.sort ASC, s.id ASC
         LIMIT 1
     </select>
 
     <select id="listByIds" resultType="ecommerce.order.entity.ProductSku">
-        SELECT id, product_id, sku_code, spec_json, spec_key, price, stock, status
-        FROM product_sku
-        WHERE id IN
+        SELECT s.id, s.product_id, s.sku_code, s.price, s.stock, s.status,
+               <include refid="specJsonSub"/> AS spec_json
+        FROM product_sku s
+        WHERE s.id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">
             #{id}
         </foreach>

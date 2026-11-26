@@ -13,8 +13,10 @@ import ecommerce.product.dto.AdminSkuDTO;
 import ecommerce.product.dto.SkuSpecDTO;
 import ecommerce.product.entity.Product;
 import ecommerce.product.entity.ProductSku;
+import ecommerce.product.entity.SkuSpecRel;
 import ecommerce.product.mapper.ProductMapper;
 import ecommerce.product.mapper.ProductSkuMapper;
+import ecommerce.product.mapper.SkuSpecRelMapper;
 import ecommerce.product.service.AdminProductService;
 import ecommerce.product.support.ProductSpecsCodec;
 import ecommerce.product.vo.AdminProductVO;
@@ -45,21 +47,23 @@ import java.util.Set;
 @Service
 public class AdminProductServiceImpl implements AdminProductService {
 
-    private static final int MAX_SPEC_DIMENSIONS = 3;
     private static final int MAX_SPEC_VALUES = 10;
 
     private final ProductMapper productMapper;
     private final ProductSkuMapper skuMapper;
+    private final SkuSpecRelMapper skuSpecRelMapper;
     private final ProductSpecsCodec specsCodec;
     private final CategoryCacheEvictor categoryCacheEvictor;
     private final ProductCacheEvictor productCacheEvictor;
     private final ObjectMapper objectMapper;
 
     public AdminProductServiceImpl(ProductMapper productMapper, ProductSkuMapper skuMapper,
+                                   SkuSpecRelMapper skuSpecRelMapper,
                                    ProductSpecsCodec specsCodec, CategoryCacheEvictor categoryCacheEvictor,
                                    ProductCacheEvictor productCacheEvictor, ObjectMapper objectMapper) {
         this.productMapper = productMapper;
         this.skuMapper = skuMapper;
+        this.skuSpecRelMapper = skuSpecRelMapper;
         this.specsCodec = specsCodec;
         this.categoryCacheEvictor = categoryCacheEvictor;
         this.productCacheEvictor = productCacheEvictor;
@@ -156,10 +160,14 @@ public class AdminProductServiceImpl implements AdminProductService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     @OperationLog(module = "product", action = "PRODUCT_REMOVE", bizId = "#id")
     public void delete(Long id) {
         // 先查一次拿商品名称，日志里要能看出删的是哪件商品
         Product old = productMapper.findByIdAdmin(id);
+        // 级联清理：SKU 与规格关联表无外键约束，必须显式删除，否则残留孤儿 SKU
+        skuSpecRelMapper.deleteByProductId(id);
+        skuMapper.deleteByProductId(id);
         int rows = productMapper.delete(id);
         if (rows == 0) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "商品不存在");
@@ -210,6 +218,8 @@ public class AdminProductServiceImpl implements AdminProductService {
     /**
      * 保存规格维度与 SKU 明细。dto 未涉及规格时直接返回（上架开关等局部更新不动 SKU）。
      * 多规格按 id 差量：无 id 新增、有 id 更新、未提交的旧 SKU 置停用。
+     * 写入时同步维护 product_sku_spec_rel 多对多中间表，spec_json/spec_key 仍保留用于 DB 层兜底唯一约束，
+     * 但业务逻辑以中间表为准。
      */
     private void saveSkus(Long productId, AdminProductDTO dto, Product product,
                           String existingSpecsJson, LocalDateTime now, boolean createMode) {
@@ -239,28 +249,58 @@ public class AdminProductServiceImpl implements AdminProductService {
         for (ProductSku s : existing) {
             existingById.put(s.getId(), s);
         }
+
+        // === 预查字典：groupName -> {value -> (groupId, valueId, groupSort)} ===
+        Map<String, Map<String, SpecDictRef>> dictCache = buildSpecDictCache(dims);
+
+        // === 解析所有行 → 规格组合，校验重复 ===
+        // existing 里已有的 rel 集合（Java 内存集合做比对，避免 MySQL 5.7 不支持 VALUES 子查询）
+        Map<Long, Set<GroupValuePair>> existingPairsBySku = loadExistingPairsBySku(productId);
+
         Set<Long> kept = new HashSet<>();
-        Set<String> specKeys = new HashSet<>();
+        List<SkuSpecRel> relBatch = new ArrayList<>();
         for (int i = 0; i < rows.size(); i++) {
             AdminSkuDTO row = rows.get(i);
             Map<String, String> specJson = row.getSpecJson() == null ? Map.of() : row.getSpecJson();
-            String specKey = buildSpecKey(specJson, dims);
-            if (!specKeys.add(specKey)) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "存在重复的规格组合：" + specKey);
+
+            // 解析为 (groupId, valueId, value, sort) 列表
+            List<SpecTuple> specs = resolveSpecs(specJson, dims, dictCache);
+            Set<GroupValuePair> pairSet = specs.stream()
+                    .map(t -> new GroupValuePair(t.groupId, t.valueId))
+                    .collect(java.util.stream.Collectors.toSet());
+
+            // 先查当前 product_id 下所有 SKU（排除正在编辑的 row.getId()），是否有完全相同组合
+            for (Map.Entry<Long, Set<GroupValuePair>> e : existingPairsBySku.entrySet()) {
+                Long otherSkuId = e.getKey();
+                if (Objects.equals(otherSkuId, row.getId())) continue;
+                Set<GroupValuePair> otherPairs = e.getValue();
+                if (otherPairs != null && otherPairs.size() == pairSet.size() && otherPairs.containsAll(pairSet)) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST,
+                            "存在重复的规格组合（与 SKU ID=" + otherSkuId + " 相同）");
+                }
             }
+            // 行内去重（dto 自身两行相同）
+            for (int j = 0; j < i; j++) {
+                Set<GroupValuePair> prev = rows.get(j) != null
+                        ? parseRowPairs(rows.get(j), dims, dictCache)
+                        : null;
+                if (prev != null && prev.size() == pairSet.size() && prev.containsAll(pairSet)) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "存在重复的规格组合：行 " + (j + 1) + " 与行 " + (i + 1));
+                }
+            }
+
             if (row.getId() != null && !existingById.containsKey(row.getId())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "SKU 不属于该商品，无法更新");
             }
             ProductSku target = row.getId() != null ? existingById.get(row.getId()) : new ProductSku();
             target.setProductId(productId);
-            target.setSkuCode(row.getSkuCode());
-            target.setSpecJson(writeJson(specJson));
-            target.setSpecKey(specKey);
+            // 商家编码：未填则按「商品编码-规格值」自动生成，保证非空
+            target.setSkuCode(resolveSkuCode(row.getSkuCode(), product, specs, i));
+            // specJson / specKey 已下线，规格选择统一由 product_sku_spec_rel 中间表承载
             target.setPrice(row.getPrice());
             target.setMarketPrice(row.getMarketPrice());
             target.setCostPrice(row.getCostPrice());
             if (row.getId() != null) {
-                // 编辑已有 SKU：库存不允许手改，保持库中原值
                 ProductSku prev = existingById.get(row.getId());
                 if (row.getStock() != null && !Objects.equals(prev.getStock(), row.getStock())) {
                     throw new BusinessException(HttpStatus.BAD_REQUEST,
@@ -268,20 +308,43 @@ public class AdminProductServiceImpl implements AdminProductService {
                 }
                 target.setStock(prev.getStock());
             } else {
-                // 新增 SKU：允许填初始库存
                 target.setStock(row.getStock() == null ? 0 : row.getStock());
             }
             target.setStatus(row.getStatus() == null ? 1 : row.getStatus());
+            // 多规格商品没有默认 SKU；商品类型从单规格切过来时需清掉历史标记
+            target.setIsDefault(0);
             target.setSort(i);
             target.setUpdateTime(now);
             if (row.getId() != null) {
                 skuMapper.update(target);
+                // 先删旧 rel
+                skuSpecRelMapper.deleteBySkuId(target.getId());
             } else {
                 target.setCreateTime(now);
                 skuMapper.insert(target);
             }
+
+            // 准备 rel 记录，INSERT 时先删再插
+            for (SpecTuple t : specs) {
+                relBatch.add(SkuSpecRel.builder()
+                        .skuId(target.getId())
+                        .specGroupId(t.groupId)
+                        .specValueId(t.valueId)
+                        .specValue(t.value)
+                        .sort(t.sort)
+                        .createTime(now)
+                        .build());
+            }
+            // 行内集合更新（供后续行校验）
+            existingPairsBySku.put(target.getId(), pairSet);
+
             kept.add(target.getId());
         }
+        // 批量写 rel（ON DUPLICATE KEY UPDATE 已写好，幂等）
+        if (!relBatch.isEmpty()) {
+            skuSpecRelMapper.batchInsert(relBatch);
+        }
+
         for (ProductSku s : existing) {
             if (!kept.contains(s.getId()) && Objects.equals(s.getStatus(), 1)) {
                 skuMapper.updateStatus(s.getId(), 0);
@@ -290,11 +353,121 @@ public class AdminProductServiceImpl implements AdminProductService {
         skuMapper.refreshProductAggregate(productId, now);
     }
 
-    /** 单规格：停用其余 SKU，保留/重建一条 __DEFAULT__ 默认 SKU */
+    // ==================== 规格辅助方法 ====================
+
+    /** 规格值字典缓存：groupName → {value → SpecDictRef} */
+    private Map<String, Map<String, SpecDictRef>> buildSpecDictCache(List<SkuSpecDTO> dims) {
+        Map<String, Map<String, SpecDictRef>> result = new LinkedHashMap<>();
+        for (SkuSpecDTO dim : dims) {
+            String name = dim.getName();
+            if (name == null || name.isBlank()) continue;
+            Long gid = dim.getGroupId();
+            if (gid == null) {
+                // 自定义规格：字典没预建，尝试按 name 建或查
+                gid = skuSpecRelMapper.findGroupIdByName(name);
+                if (gid == null) {
+                    log.warn("规格名 '{}' 在字典中不存在，服务层校验跳过", name);
+                }
+            }
+            Map<String, SpecDictRef> inner = new LinkedHashMap<>();
+            if (gid != null) {
+                Integer groupSort = skuSpecRelMapper.findGroupSort(gid);
+                for (String v : dim.getValues()) {
+                    Long vid = skuSpecRelMapper.findValueId(gid, v);
+                    if (vid == null) {
+                        // 自动补建
+                        skuSpecRelMapper.insertSpecValue(gid, v, 999, LocalDateTime.now());
+                        vid = skuSpecRelMapper.findValueId(gid, v);
+                    }
+                    inner.put(v, new SpecDictRef(gid, vid, groupSort == null ? 999 : groupSort));
+                }
+            }
+            result.put(name, inner);
+        }
+        return result;
+    }
+
+    private List<SpecTuple> resolveSpecs(Map<String, String> specJson, List<SkuSpecDTO> dims,
+                                         Map<String, Map<String, SpecDictRef>> dictCache) {
+        List<SpecTuple> out = new ArrayList<>();
+        for (SkuSpecDTO dim : dims) {
+            String value = specJson.get(dim.getName());
+            if (value == null || value.isBlank()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST,
+                        "SKU 缺少规格【" + dim.getName() + "】的取值");
+            }
+            if (!dim.getValues().contains(value)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST,
+                        "规格【" + dim.getName() + "】的值【" + value + "】不在可选值中");
+            }
+            Map<String, SpecDictRef> inner = dictCache.get(dim.getName());
+            if (inner != null) {
+                SpecDictRef ref = inner.get(value);
+                if (ref != null) {
+                    out.add(new SpecTuple(ref.groupId, ref.valueId, value, ref.sort));
+                }
+            }
+        }
+        return out;
+    }
+
+    private Set<GroupValuePair> parseRowPairs(AdminSkuDTO row, List<SkuSpecDTO> dims,
+                                               Map<String, Map<String, SpecDictRef>> dictCache) {
+        Map<String, String> specJson = row.getSpecJson() == null ? Map.of() : row.getSpecJson();
+        List<SpecTuple> specs = resolveSpecs(specJson, dims, dictCache);
+        return specs.stream().map(t -> new GroupValuePair(t.groupId, t.valueId)).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private Map<Long, Set<GroupValuePair>> loadExistingPairsBySku(Long productId) {
+        List<SkuSpecRel> rels = skuSpecRelMapper.listByProductId(productId);
+        Map<Long, Set<GroupValuePair>> out = new LinkedHashMap<>();
+        for (SkuSpecRel r : rels) {
+            out.computeIfAbsent(r.getSkuId(), k -> new HashSet<>())
+                    .add(new GroupValuePair(r.getSpecGroupId(), r.getSpecValueId()));
+        }
+        return out;
+    }
+
+    /** 字典引用 */
+    private record SpecDictRef(Long groupId, Long valueId, int sort) {}
+    /** 解析中间结构 */
+    private record SpecTuple(Long groupId, Long valueId, String value, int sort) {}
+    /** 用于重复校验的唯一对 */
+    private record GroupValuePair(Long groupId, Long valueId) {}
+
+    /**
+     * 生成商家编码（sku_code）。
+     * <p>
+     * 规则：后台明确填写则用填写值；否则用「商品编码-规格值1-规格值2」自动拼装；
+     * 商品编码也为空时退化为「SKU-{商品ID}-{行号}」，保证 sku_code 永不为空
+     * （数据库列已改为 NOT NULL）。
+     */
+    private String resolveSkuCode(String input, Product product, List<SpecTuple> specs, int rowIndex) {
+        if (input != null && !input.isBlank()) {
+            return input.trim();
+        }
+        String base = product.getProductCode() != null && !product.getProductCode().isBlank()
+                ? product.getProductCode().trim()
+                : "SKU" + product.getId();
+        if (specs != null && !specs.isEmpty()) {
+            String suffix = specs.stream()
+                    .sorted(java.util.Comparator.comparingInt(SpecTuple::sort))
+                    .map(SpecTuple::value)
+                    .filter(v -> v != null && !v.isBlank())
+                    .collect(java.util.stream.Collectors.joining("-"));
+            if (!suffix.isBlank()) {
+                return base + "-" + suffix;
+            }
+        }
+        return base + "-" + (rowIndex + 1);
+    }
+
+
+    /** 单规格：停用其余 SKU，保留/重建一条默认 SKU（由 is_default=1 标记） */
     private void saveDefaultSku(Long productId, AdminProductDTO dto, Product product,
                                 List<ProductSku> existing, LocalDateTime now) {
         ProductSku def = existing.stream()
-                .filter(s -> "__DEFAULT__".equals(s.getSpecKey()))
+                .filter(s -> Objects.equals(s.getIsDefault(), 1))
                 .findFirst().orElse(null);
         AdminSkuDTO row = dto.getSkus() != null && dto.getSkus().size() == 1 ? dto.getSkus().get(0) : null;
         for (ProductSku s : existing) {
@@ -304,8 +477,6 @@ public class AdminProductServiceImpl implements AdminProductService {
         }
         ProductSku target = def != null ? def : new ProductSku();
         target.setProductId(productId);
-        target.setSpecJson("{}");
-        target.setSpecKey("__DEFAULT__");
         target.setPrice(row != null && row.getPrice() != null ? row.getPrice()
                 : (product.getSalesPrice() != null ? product.getSalesPrice() : BigDecimal.ZERO));
         target.setMarketPrice(row != null && row.getMarketPrice() != null ? row.getMarketPrice()
@@ -324,8 +495,10 @@ public class AdminProductServiceImpl implements AdminProductService {
             target.setStock(row != null && row.getStock() != null ? row.getStock()
                     : (product.getStock() != null ? product.getStock() : 0));
         }
-        target.setSkuCode(row != null ? row.getSkuCode() : product.getProductCode());
+        // 商家编码：未填则按「商品编码-1」自动生成，保证非空
+        target.setSkuCode(resolveSkuCode(row != null ? row.getSkuCode() : null, product, null, 0));
         target.setStatus(1);
+        target.setIsDefault(1);
         target.setSort(0);
         target.setUpdateTime(now);
         if (def != null) {
@@ -382,9 +555,6 @@ public class AdminProductServiceImpl implements AdminProductService {
     private String encodeSpecs(List<SkuSpecDTO> dims) {
         if (dims == null) {
             return null;
-        }
-        if (dims.size() > MAX_SPEC_DIMENSIONS) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "销售规格最多 " + MAX_SPEC_DIMENSIONS + " 个维度");
         }
         Set<String> names = new HashSet<>();
         for (SkuSpecDTO dim : dims) {
@@ -471,11 +641,10 @@ public class AdminProductServiceImpl implements AdminProductService {
         }
     }
 
-    private SkuVO toSkuVO(ProductSku s) {
+    private SkuVO toSkuVO(ProductSku s, List<SkuSpecRel> rels) {
         SkuVO vo = new SkuVO();
         vo.setId(s.getId());
-        vo.setSpecKey(s.getSpecKey());
-        vo.setSpecJson(parseSpecJson(s.getSpecJson()));
+        vo.setSpecJson(buildSpecJsonFromRel(rels));
         vo.setPrice(s.getPrice());
         vo.setMarketPrice(s.getMarketPrice());
         vo.setCostPrice(s.getCostPrice());
@@ -486,11 +655,22 @@ public class AdminProductServiceImpl implements AdminProductService {
         return vo;
     }
 
+    /** 从 rel 聚合成 Map<groupName, value>；rels 为空返回空 Map（单规格 SKU） */
+    private Map<String, String> buildSpecJsonFromRel(List<SkuSpecRel> rels) {
+        if (rels == null || rels.isEmpty()) return Map.of();
+        Map<String, String> out = new LinkedHashMap<>();
+        for (SkuSpecRel r : rels) {
+            if (r.getGroupName() != null && r.getSpecValue() != null) {
+                out.put(r.getGroupName(), r.getSpecValue());
+            }
+        }
+        return out;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, String> parseSpecJson(String json) {
-        if (json == null || json.isBlank()) {
-            return Map.of();
-        }
+        // 仅在 AdminSkuDTO 反序列化时用到，保留签名但不再读 DB 字段
+        if (json == null || json.isBlank()) return Map.of();
         try {
             return (Map<String, String>) objectMapper.readValue(json, Map.class);
         } catch (Exception e) {
@@ -583,9 +763,16 @@ public class AdminProductServiceImpl implements AdminProductService {
     }
 
     private AdminProductVO toVO(Product p, boolean withSkus) {
-        List<SkuVO> skus = withSkus
-                ? skuMapper.listByProductId(p.getId()).stream().map(this::toSkuVO).toList()
-                : List.of();
+        List<SkuVO> skus = List.of();
+        if (withSkus) {
+            List<ProductSku> raw = skuMapper.listByProductId(p.getId());
+            List<SkuSpecRel> allRels = skuSpecRelMapper.listByProductId(p.getId());
+            Map<Long, List<SkuSpecRel>> relsBySku = allRels.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(SkuSpecRel::getSkuId));
+            skus = raw.stream()
+                    .map(s -> toSkuVO(s, relsBySku.getOrDefault(s.getId(), List.of())))
+                    .toList();
+        }
         return AdminProductVO.builder()
                 .id(p.getId())
                 .name(p.getName())

@@ -2,9 +2,22 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ecommerce.product.mapper.StockSkuMapper">
 
+    <!-- 通过 product_sku_spec_rel 聚合每个 SKU 的规格展示串（如 颜色:曜石黑|存储容量:256G） -->
+    <sql id="skuSpecJoin">
+        LEFT JOIN (
+            SELECT r.sku_id,
+                   GROUP_CONCAT(CONCAT(g.name, ':', r.spec_value) ORDER BY r.sort SEPARATOR '|') AS spec_text
+            FROM product_sku_spec_rel r
+            LEFT JOIN product_spec_group g ON g.id = r.spec_group_id
+            GROUP BY r.sku_id
+        ) spec_agg ON spec_agg.sku_id = s.id
+    </sql>
+
     <sql id="skuColumns">
         s.id, s.product_id AS productId, p.name AS productName, p.image AS productImage,
-        s.sku_code AS skuCode, s.spec_json AS specJson, s.stock,
+        s.sku_code AS skuCode,
+        COALESCE(spec_agg.spec_text, '') AS specJson,
+        s.stock,
         s.min_stock AS minStock, s.max_stock AS maxStock, s.status, s.price
     </sql>
 
@@ -13,6 +26,7 @@
         SELECT <include refid="skuColumns"/>
         FROM product_sku s
         INNER JOIN products p ON p.id = s.product_id
+        <include refid="skuSpecJoin"/>
         <where>
             <if test="search != null and search != ''">
                 AND (s.sku_code LIKE CONCAT('%', #{search}, '%')
@@ -45,6 +59,7 @@
         SELECT <include refid="skuColumns"/>
         FROM product_sku s
         INNER JOIN products p ON p.id = s.product_id
+        <include refid="skuSpecJoin"/>
         WHERE s.min_stock > 0 AND s.stock &lt; s.min_stock AND s.status = 1
         ORDER BY s.stock ASC, s.id ASC
         LIMIT #{limit}
@@ -84,9 +99,10 @@
 
     <!-- 看板：SKU 库存分布 TOP N（水平柱状图用） -->
     <select id="stockDistTopN" resultType="java.util.HashMap">
-        SELECT p.name AS productName, s.spec_key AS specText, s.stock
+        SELECT p.name AS productName, spec_agg.spec_text AS specText, s.stock
         FROM product_sku s
         INNER JOIN products p ON p.id = s.product_id
+        <include refid="skuSpecJoin"/>
         WHERE s.status = 1
         ORDER BY s.stock DESC
         LIMIT #{limit}
@@ -97,7 +113,7 @@
         SELECT
             s.id AS skuId,
             p.name AS productName,
-            s.spec_key AS specText,
+            spec_agg.spec_text AS specText,
             s.stock,
             s.min_stock AS minStock,
             CASE
@@ -109,6 +125,7 @@
             COALESCE(t.todayOut, 0) AS todayOutQty
         FROM product_sku s
         INNER JOIN products p ON p.id = s.product_id
+        <include refid="skuSpecJoin"/>
         LEFT JOIN (
             SELECT sku_id, SUM(qty) AS todayOut
             FROM stock_transaction

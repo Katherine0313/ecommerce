@@ -472,7 +472,7 @@ const fillField = (r) => {
 const toBodyHtml = (text) => String(text || '').split(/\n+/).filter(Boolean)
     .map(p => `<p>${escapeHtml(p)}</p>`).join('')
 
-// 全部生成：文案（名称/副标题/主标题/详情）+ 主图 + 详情图，一次跑完并自动回填
+// 全部生成：只生成文案（名称/副标题/主标题/详情）并自动回填；主图/详情图走各自的生图入口
 const generateAll = async () => {
   if (!addGoodsForm.value.name?.trim()) {
     message.warning('请先填写商品名称（大致名称即可），AI 以此为依据生成')
@@ -482,18 +482,19 @@ const generateAll = async () => {
     return
   }
   aiGenerating.value = 'all'
-  // 每一步都基于最新表单值取上下文：文案生成后名称可能已被改写，生图要用新名称
-  const aiProduct = () => ({
-    name: addGoodsForm.value.name.trim(),
-    categoryName: currentCategoryName(),
-    subTitle: addGoodsForm.value.subTitle,
-    sellingPoints: aiSellingPoints.value,
-  })
 
   // 1. 文案
   let fields = {}
   try {
-    const res = await generateCopy({ product: aiProduct(), scene: 'all' })
+    const res = await generateCopy({
+      product: {
+        name: addGoodsForm.value.name.trim(),
+        categoryName: currentCategoryName(),
+        subTitle: addGoodsForm.value.subTitle,
+        sellingPoints: aiSellingPoints.value,
+      },
+      scene: 'all',
+    })
     fields = res.data?.data?.fields || {}
   } catch (e) {
     aiGenerating.value = ''
@@ -507,47 +508,19 @@ const generateAll = async () => {
       filled++
     }
   }
-  if (fields.description) filled++
+  if (fields.description) {
+    addGoodsForm.value.body = toBodyHtml(fields.description)
+    filled++
+  }
   // 已自动回填，清空旧的预览区，避免还要再点一次「填入」
   aiResults.value = []
-
-  // 2. 主图
-  let mainUrl = ''
-  try {
-    const res = await generateImage({ prompt: '', scene: 'main', count: 1, product: aiProduct() })
-    mainUrl = res.data?.data?.images?.[0]?.url || ''
-  } catch (e) {
-    message.warning('主图生成失败，文案已回填')
-  }
-
-  // 3. 详情图
-  let detailUrl = ''
-  try {
-    const res = await generateImage({ prompt: '', scene: 'detail', count: 1, product: aiProduct() })
-    detailUrl = res.data?.data?.images?.[0]?.url || ''
-  } catch (e) {
-    message.warning('详情图生成失败，其余内容已回填')
-  }
-
-  // 统一写回表单：主图走 image + 缩略图；详情文案和详情图一次性写成 body，避免多次插入错位
-  if (mainUrl) {
-    addGoodsForm.value.image = mainUrl
-    fileList.value = [{uid: '-1', name: 'AI 主图', status: 'done', url: imageHost + mainUrl}]
-  }
-  const descHtml = fields.description ? toBodyHtml(fields.description) : (addGoodsForm.value.body || '')
-  const imgHtml = detailUrl
-      ? `<p><img src="${detailUrl}" style="max-width:100%" alt="详情图"/></p>`
-      : ''
-  if (descHtml || imgHtml) {
-    addGoodsForm.value.body = descHtml + imgHtml
-  }
-
   aiGenerating.value = ''
-  if (!filled && !mainUrl && !detailUrl) {
+
+  if (!filled) {
     message.warning('没有生成任何内容，请补充卖点后重试')
     return
   }
-  message.success('已一键生成并回填：文案、主图、详情图')
+  message.success('已生成并回填文案')
 }
 
 // 一键清空：只清 AI 生成/回填的内容，保留分类、规格、SKU、销售信息等手动维护部分
@@ -593,7 +566,13 @@ const generateAiImage = () => {
           message.warning('未生成图片，请调整描述后重试')
         }
       })
-      .catch(() => {})
+      .catch((e) => {
+        // 400/401/403/429/500 已由 axios 拦截器统一提示，这里补 502 和网络异常
+        const status = e?.response?.status
+        if (!status || status === 502) {
+          message.error('图片生成失败，请稍后重试')
+        }
+      })
       .finally(() => { imgModal.value.loading = false })
 }
 

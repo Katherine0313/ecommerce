@@ -459,6 +459,7 @@ onBeforeUnmount(() => {
             class="msg-avatar"
             :src="aiAvatar"
             alt="AI 客服"
+            loading="lazy"
           />
           <div class="bubble-wrap">
             <div v-if="msg.thinkSeconds" class="think-done">已思考 {{ msg.thinkSeconds }} 秒</div>
@@ -518,6 +519,7 @@ onBeforeUnmount(() => {
             class="msg-avatar msg-avatar-user"
             :src="userAvatar"
             alt="我"
+            loading="lazy"
           />
         </div>
       </div>

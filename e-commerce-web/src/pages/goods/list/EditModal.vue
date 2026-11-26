@@ -112,9 +112,38 @@ const addGoodsForm = ref({
 })
 
 // ====================== 把值存到表单里 ======================
+// 详情接口比弹窗内容渲染快时，先暂存 detail，等 SkuEditor 挂载后再回填
+let pendingDetail = null
+
+// 回填销售规格（SKU）：组件已挂载 + 规格库加载完成，才能按 groupId 正确匹配
+const applySkuDetail = () => {
+  const detail = pendingDetail
+  const editor = skuEditorRef.value
+  if (!detail || !editor) return
+  pendingDetail = null
+  const id = editingId.value
+  const loading = editor.setCategory(detail.categoryId ?? null)
+  const fill = () => {
+    // 加载期间切换了编辑对象就丢弃，避免串数据
+    if (editingId.value !== id || !skuEditorRef.value) return
+    skuEditorRef.value.setData(detail.skuType, detail.skuSpecs || [], detail.skus || [])
+  }
+  if (loading && typeof loading.then === 'function') {
+    loading.then(fill, fill)
+  } else {
+    fill()
+  }
+  if (salesInfoRef.value?.salesInfoForm) {
+    salesInfoRef.value.salesInfoForm.listingStatus = detail.listingStatus ?? 1
+  }
+  specsRef.value?.setSpecs(detail.specs || [], categoryTemplate(detail.categoryId))
+}
+
 // 定义打开弹窗的方法，接收 record 并回填到表单
 const open = (record) => {
-  editingId.value = record.id  // 存下要编辑的商品 id
+  const id = record.id
+  editingId.value = id  // 存下要编辑的商品 id
+  pendingDetail = null
   // 0. 先清空上一件商品的 SKU 状态，避免串数据
   skuEditorRef.value?.reset()
   // 1. 回填商品基本信息
@@ -140,19 +169,17 @@ const open = (record) => {
     if (salesInfoRef.value?.salesInfoForm) {
       salesInfoRef.value.salesInfoForm.listingStatus = record.listingStatus ?? 1
     }
+    // 详情可能已经先到，此时组件才挂载，补一次 SKU 回填
+    applySkuDetail()
   })
   // 4. 列表接口不带 SKU 明细，单独查详情回填销售规格（skuType / skuSpecs / skus）
-  getGoodsDetail(record.id)
+  getGoodsDetail(id)
       .then(res => {
         const detail = res.data?.data
-        if (!detail) return
-        // 先按商品分类过滤规格库，再 setData 回填 SKU（setData 内部按 groupId/name 匹配规格库）
-        skuEditorRef.value?.setCategory(detail.categoryId ?? null)
-        skuEditorRef.value?.setData(detail.skuType, detail.skuSpecs || [], detail.skus || [])
-        if (salesInfoRef.value?.salesInfoForm) {
-          salesInfoRef.value.salesInfoForm.listingStatus = detail.listingStatus ?? 1
-        }
-        specsRef.value?.setSpecs(detail.specs || [], categoryTemplate(detail.categoryId))
+        // 请求返回前已切换到别的商品，丢弃旧数据
+        if (!detail || editingId.value !== id) return
+        pendingDetail = detail
+        applySkuDetail()
       })
       .catch(() => {
         message.warning('商品规格明细加载失败，请刷新后重试')

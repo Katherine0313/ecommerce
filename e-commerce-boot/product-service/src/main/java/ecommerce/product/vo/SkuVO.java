@@ -13,10 +13,8 @@ import java.util.Map;
 public class SkuVO {
     @Schema(description = "SKU ID")
     private Long id;
-    @Schema(description = "规格组合，如 {\"颜色\":\"曜石黑\",\"内存\":\"256G\"}")
+    @Schema(description = "规格组合（由 product_sku_spec_rel 聚合），如 {\"颜色\":\"曜石黑\",\"内存\":\"256G\"}")
     private Map<String, String> specJson;
-    @Schema(description = "规格规范化串")
-    private String specKey;
     @Schema(description = "售价")
     private BigDecimal price;
     @Schema(description = "市场价/划线价")

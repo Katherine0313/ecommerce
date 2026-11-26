@@ -135,11 +135,19 @@ fi
 
 # 部署前确认：SSH 可用，且服务器 compose 已同步 image/REGISTRY 配置
 if [[ $DRY_RUN -eq 0 && $NO_DEPLOY -eq 0 ]]; then
+  # 第一步：先确认 SSH 本身能通（区分「连不上」和「compose 没同步」两种原因）
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$SERVER" true 2>/tmp/release_ssh_err.txt; then
+    echo "SSH 连接失败：$SERVER" >&2
+    sed 's/^/  /' /tmp/release_ssh_err.txt >&2 || true
+    echo "  请先确认：ssh $SERVER true 能免密登录" >&2
+    exit 1
+  fi
+  # 第二步：确认服务器 compose 里有 REGISTRY 配置
   if ! ssh -o BatchMode=yes -o ConnectTimeout=8 "$SERVER" \
-      "grep -q 'REGISTRY' '$REMOTE_BASE/docker-compose.yml'" 2>/dev/null; then
-    echo "无法确认服务器 compose 或 SSH 未配置，请先检查：" >&2
-    echo "  1) SSH 免密：ssh $SERVER true" >&2
-    echo "  2) 同步 compose：scp deploy/docker-compose.yml $SERVER:$REMOTE_BASE/docker-compose.yml" >&2
+      "grep -q 'REGISTRY' '$REMOTE_BASE/docker-compose.yml'" 2>/tmp/release_ssh_err.txt; then
+    echo "服务器 compose 缺少 REGISTRY 配置：$REMOTE_BASE/docker-compose.yml" >&2
+    sed 's/^/  /' /tmp/release_ssh_err.txt >&2 || true
+    echo "  请同步：scp deploy/docker-compose.yml $SERVER:$REMOTE_BASE/docker-compose.yml" >&2
     exit 1
   fi
 fi

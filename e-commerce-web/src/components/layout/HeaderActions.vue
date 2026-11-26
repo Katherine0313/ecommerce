@@ -27,7 +27,7 @@
   <StepinHeaderAction class="header-action-github">
     <a
       class="action-item"
-      href="https://github.com/Katherine0313/e-commerce"
+      href="https://github.com/Katherine0313/ecommerce.git"
       target="_blank"
       rel="noopener"
     >

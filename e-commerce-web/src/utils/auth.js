@@ -10,8 +10,9 @@ export function getCurrentUser() {
     const token = getToken()
     if (!token) return null
     const payload = token.split('.')[1]
-    // base64url → base64（JWT 用 -_ 代替 +/）
+    // base64url → base64（JWT 用 -_ 代替 +/，且省略末尾 padding；没 padding 时 atob 会抛 InvalidCharacterError）
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+        .padEnd(Math.ceil(payload.length / 4) * 4, '=')
     // 正确处理含中文的 payload（避免 atob 直接转成乱码）
     const json = decodeURIComponent(
       atob(base64)

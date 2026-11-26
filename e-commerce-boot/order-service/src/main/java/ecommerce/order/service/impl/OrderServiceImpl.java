@@ -33,6 +33,7 @@ import ecommerce.order.service.OrderService;
 import ecommerce.order.service.PromotionPricingService;
 import ecommerce.order.support.InsuranceReviewer;
 import ecommerce.order.support.LogisticsBuilder;
+import ecommerce.order.support.PhoneValidator;
 import ecommerce.order.vo.LogisticsTraceVO;
 import ecommerce.order.vo.LogisticsVO;
 import ecommerce.order.vo.OrderCountsVO;
@@ -142,8 +143,12 @@ public class OrderServiceImpl implements OrderService {
         if (dto.getConsignee() == null || dto.getConsignee().isBlank()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "收货人不能为空");
         }
-        if (dto.getPhone() == null || !dto.getPhone().trim().matches("\\d{11}")) {
+        if (!PhoneValidator.isValid(dto.getPhone())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "手机号格式不正确");
+        }
+        if (PhoneValidator.isMasked(dto.getPhone())) {
+            // 脱敏号能下单但发不了货，留个日志方便运营补全真实号码
+            log.warn("下单手机号为脱敏格式，发货前需补全: {}", dto.getPhone());
         }
         if (dto.getItems() == null || dto.getItems().isEmpty()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "商品明细不能为空");

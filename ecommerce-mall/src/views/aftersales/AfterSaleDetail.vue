@@ -403,6 +403,7 @@ onMounted(load)
               :initial-index="index"
               fit="cover"
               class="evidence-img"
+              lazy
             />
           </div>
         </div>

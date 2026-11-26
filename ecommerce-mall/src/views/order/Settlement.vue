@@ -54,7 +54,7 @@
               <span v-else class="check-circle"></span>
             </div>
 
-            <img :src="item.image" class="item-image" alt="" />
+            <img :src="item.image" class="item-image" alt="" loading="lazy" />
 
             <div class="item-info">
               <div class="item-name">{{ item.name }}</div>
@@ -99,6 +99,7 @@
               :src="item.image"
               class="checkout-thumb"
               alt=""
+              loading="lazy"
             />
           </div>
 

@@ -381,7 +381,8 @@ const setCategory = (categoryId) => {
   // 切换分类时清空旧维度和 SKU 行，防止不同分类的规格混在一起
   dimensions.value = []
   rows.value = []
-  loadLibrary(id)
+  // 返回加载 Promise，编辑回显要等规格库就绪后再 setData，否则 groupId 匹配不上
+  return loadLibrary(id)
 }
 
 defineExpose({ validate, getPayload, getAggregate, setData, reset, setCategory })

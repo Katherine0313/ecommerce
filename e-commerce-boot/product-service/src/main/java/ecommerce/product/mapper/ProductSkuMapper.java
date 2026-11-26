@@ -32,6 +32,9 @@ public interface ProductSkuMapper {
 
     int updateStatusByProductId(@Param("productId") Long productId, @Param("status") Integer status);
 
+    /** 删除某商品下所有 SKU（删商品时级联调用，避免残留孤儿 SKU） */
+    int deleteByProductId(@Param("productId") Long productId);
+
     /** 汇总 products.stock / sales_price / market_price 冗余字段 */
     int refreshProductAggregate(@Param("productId") Long productId, @Param("now") LocalDateTime now);
 }
